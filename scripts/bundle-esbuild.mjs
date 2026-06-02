@@ -123,7 +123,7 @@ const common = {
   format: "cjs",
   target: "node20",
   sourcemap: true,
-  logLevel: "info",
+  logLevel: "warning",
   mainFields: ["main"],
   resolveExtensions: [".js", ".cjs", ".json"],
 };

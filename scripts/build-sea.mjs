@@ -123,18 +123,19 @@ async function buildSeaBinary({ name, bundlePath, outputPath, assets, assetsMani
 
   await fs.writeFile(seaConfigPath, JSON.stringify(config, null, 2), "utf8");
 
-  const buildSea = spawnSync(process.execPath, ["--build-sea", seaConfigPath], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  // Native --build-sea on macOS can produce binaries that exit silently; postject is reliable.
+  const preferPostject = process.platform === "darwin";
+  if (!preferPostject) {
+    const buildSea = spawnSync(process.execPath, ["--build-sea", seaConfigPath], {
+      cwd: root,
+      encoding: "utf8",
+    });
 
-  if (buildSea.status === 0) {
-    await ensureFile(outputPath, `SEA output missing for ${name}`);
-    if (process.platform === "darwin") {
-      spawnSync("codesign", ["--sign", "-", outputPath], { stdio: "inherit" });
+    if (buildSea.status === 0) {
+      await ensureFile(outputPath, `SEA output missing for ${name}`);
+      await fs.chmod(outputPath, 0o755);
+      return;
     }
-    await fs.chmod(outputPath, 0o755);
-    return;
   }
 
   await buildSeaWithPostject({ name, bundlePath, outputPath, assets, assetsManifest, seaConfigPath });

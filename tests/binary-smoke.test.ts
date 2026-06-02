@@ -8,9 +8,9 @@ test("binary smoke script exists and is runnable", async (t) => {
   const scriptPath = path.join(process.cwd(), "scripts", "binary-smoke.mjs");
   await fs.access(scriptPath);
 
-  const osName = process.platform === "win32" ? "windows" : process.platform;
+  const platformTag = `${process.platform}-${process.arch}`;
   const suffix = process.platform === "win32" ? ".exe" : "";
-  const apmBin = path.join(process.cwd(), "dist", "bin", `apm-${osName}-${process.arch}${suffix}`);
+  const apmBin = path.join(process.cwd(), "dist", "bin", `apm-${platformTag}${suffix}`);
 
   try {
     await fs.access(apmBin);
@@ -32,9 +32,9 @@ test("sea smoke script skips or passes", async (t) => {
   const scriptPath = path.join(process.cwd(), "scripts", "sea-smoke.mjs");
   await fs.access(scriptPath);
 
-  const osName = process.platform === "win32" ? "windows" : process.platform;
+  const platformTag = `${process.platform}-${process.arch}`;
   const suffix = process.platform === "win32" ? ".exe" : "";
-  const daemonBin = path.join(process.cwd(), "dist", "bin", `apm-daemon-${osName}-${process.arch}${suffix}`);
+  const daemonBin = path.join(process.cwd(), "dist", "bin", `apm-daemon-${platformTag}${suffix}`);
 
   try {
     await fs.access(daemonBin);

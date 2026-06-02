@@ -5,12 +5,11 @@ import os from "node:os";
 import { promises as fs } from "node:fs";
 
 const root = process.cwd();
+const platformTag = `${process.platform}-${process.arch}`;
 const suffix = process.platform === "win32" ? ".exe" : "";
-const osName = process.platform === "win32" ? "windows" : process.platform;
-const arch = process.arch;
 
-const apmBin = path.join(root, "dist", "bin", `apm-${osName}-${arch}${suffix}`);
-const daemonBin = path.join(root, "dist", "bin", `apm-daemon-${osName}-${arch}${suffix}`);
+const apmBin = path.join(root, "dist", "bin", `apm-${platformTag}${suffix}`);
+const daemonBin = path.join(root, "dist", "bin", `apm-daemon-${platformTag}${suffix}`);
 
 await ensureExecutable(apmBin);
 await ensureExecutable(daemonBin);

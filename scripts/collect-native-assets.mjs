@@ -26,12 +26,29 @@ const sshCryptoBinding = path.join(
 );
 const cpuFeaturesBinding = path.join(root, "node_modules/cpu-features/build/Release/cpufeatures.node");
 
+function sdkBinPaths(name) {
+  if (process.platform === "win32") {
+    const fileName = `${name}.exe`;
+    return {
+      source: path.join(platformRoot, "bin", fileName),
+      relativePath: `bin/${fileName}`,
+    };
+  }
+  return {
+    source: path.join(platformRoot, "bin", name),
+    relativePath: `bin/${name}`,
+  };
+}
+
+const rgBin = sdkBinPaths("rg");
+const sandboxBin = sdkBinPaths("cursorsandbox");
+
 const required = [
-  { key: "rg", source: path.join(platformRoot, "bin/rg"), relativePath: "bin/rg", mode: 0o755 },
+  { key: "rg", source: rgBin.source, relativePath: rgBin.relativePath, mode: 0o755 },
   {
     key: "cursorsandbox",
-    source: path.join(platformRoot, "bin/cursorsandbox"),
-    relativePath: "bin/cursorsandbox",
+    source: sandboxBin.source,
+    relativePath: sandboxBin.relativePath,
     mode: 0o755,
   },
   {

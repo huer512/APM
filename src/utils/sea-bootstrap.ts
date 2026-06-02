@@ -94,13 +94,14 @@ function defaultManifest(): AssetsManifest {
   if (!platformPackage) {
     throw new Error(`Unsupported SEA platform: ${platformKey}`);
   }
+  const binSuffix = process.platform === "win32" ? ".exe" : "";
   return {
     platform: process.platform,
     arch: process.arch,
     platformPackage,
     assets: [
-      { key: "rg", relativePath: "bin/rg", mode: 0o755 },
-      { key: "cursorsandbox", relativePath: "bin/cursorsandbox", mode: 0o755 },
+      { key: "rg", relativePath: `bin/rg${binSuffix}`, mode: 0o755 },
+      { key: "cursorsandbox", relativePath: `bin/cursorsandbox${binSuffix}`, mode: 0o755 },
       { key: "sqlite3.node", relativePath: "node_modules/sqlite3/build/Release/node_sqlite3.node" },
     ],
   };
@@ -117,8 +118,12 @@ function writePlatformPackageStub(runtimeDir: string, platformPackage: string): 
       "utf8",
     );
   }
-  linkIfMissing(path.join(packageDir, "bin", "rg"), path.join(runtimeDir, "bin", "rg"));
-  linkIfMissing(path.join(packageDir, "bin", "cursorsandbox"), path.join(runtimeDir, "bin", "cursorsandbox"));
+  const binSuffix = process.platform === "win32" ? ".exe" : "";
+  linkIfMissing(path.join(packageDir, "bin", `rg${binSuffix}`), path.join(runtimeDir, "bin", `rg${binSuffix}`));
+  linkIfMissing(
+    path.join(packageDir, "bin", `cursorsandbox${binSuffix}`),
+    path.join(runtimeDir, "bin", `cursorsandbox${binSuffix}`),
+  );
 }
 
 function linkIfMissing(linkPath: string, targetPath: string): void {
