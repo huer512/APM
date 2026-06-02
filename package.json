@@ -1,0 +1,50 @@
+{
+  "name": "apm-agent-pipline-manager",
+  "version": "0.1.0",
+  "description": "APM (Agent Pipline Manager) powered by Cursor SDK",
+  "type": "module",
+  "workspaces": [
+    "apps/apm-desktop"
+  ],
+  "bin": {
+    "apm": "dist/src/bin/apm.js",
+    "apm-daemon": "dist/src/bin/apm-daemon.js"
+  },
+  "scripts": {
+    "build": "npm run build:js",
+    "build:js": "tsc -p tsconfig.json",
+    "build:assets": "node scripts/collect-native-assets.mjs",
+    "build:bundle": "node scripts/bundle-esbuild.mjs",
+    "build:sea": "node scripts/build-sea.mjs --targets=current",
+    "build:bin": "npm run build:js && npm run build:assets && npm run build:bundle && npm run build:sea",
+    "build:bin:linux": "npm run build:js && npm run build:assets && npm run build:bundle && node scripts/build-sea.mjs --targets=linux-x64,linux-arm64",
+    "build:bin:mac": "npm run build:js && npm run build:assets && npm run build:bundle && node scripts/build-sea.mjs --targets=darwin-x64,darwin-arm64",
+    "build:bin:win": "npm run build:js && npm run build:assets && npm run build:bundle && node scripts/build-sea.mjs --targets=win32-x64",
+    "build:bin:all": "npm run build:js && npm run build:assets && npm run build:bundle && node scripts/build-sea.mjs --targets=all",
+    "build:release": "npm run build:bin",
+    "smoke:bin": "node scripts/binary-smoke.mjs",
+    "smoke:sea": "node scripts/sea-smoke.mjs",
+    "dev:daemon": "tsx src/bin/apm-daemon.ts",
+    "dev:cli": "tsx src/bin/apm.ts",
+    "desktop:install": "npm install --workspace=apm-desktop",
+    "desktop:dev": "npm run tauri:dev --workspace=apm-desktop",
+    "desktop:build": "npm run tauri:build --workspace=apm-desktop",
+    "desktop:vite": "npm run build --workspace=apm-desktop",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.17",
+    "commander": "^14.0.2",
+    "js-yaml": "^4.1.0",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.1.0",
+    "@types/ssh2": "^1.15.5",
+    "esbuild": "^0.25.0",
+    "postject": "^1.0.0-alpha.6",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
+  }
+}

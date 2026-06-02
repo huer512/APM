@@ -1,0 +1,62 @@
+name: Build Binaries
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+          - os: macos-13
+            target: darwin-x64
+          - os: macos-14
+            target: darwin-arm64
+          - os: windows-latest
+            target: win32-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SEA binaries for current platform
+        run: npm run build:bin
+
+      - name: Run tests
+        run: npm test
+
+      - name: Binary smoke
+        run: npm run smoke:bin
+
+      - name: SEA agent smoke
+        if: env.CURSOR_API_KEY != ''
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          APM_RUN_SEA_SMOKE: "1"
+        run: npm run smoke:sea
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: apm-binaries-${{ matrix.target }}
+          path: |
+            dist/bin/apm-*
+            dist/bin/apm-daemon-*
+            dist/bin/manifest.json
