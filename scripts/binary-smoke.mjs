@@ -14,6 +14,9 @@ const daemonBin = path.join(root, "dist", "bin", `apm-daemon-${platformTag}${suf
 await ensureExecutable(apmBin);
 await ensureExecutable(daemonBin);
 
+preparePlatformBinary(apmBin);
+preparePlatformBinary(daemonBin);
+
 assertHelp(apmBin, ["--help"], "Usage: apm");
 assertHelp(daemonBin, ["--help"], "Usage: apm-daemon");
 assertHelp(apmBin, ["run", "--help"], "run");
@@ -22,7 +25,10 @@ assertHelp(apmBin, ["attach", "--help"], "attach");
 
 const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "apm-bin-smoke-"));
 const apmHomeDir = path.join(tempDir, "apm-home");
-const socketPath = path.join(tempDir, "apm.sock");
+const socketPath =
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\apm-bin-smoke-${process.pid}`
+    : path.join(tempDir, "apm.sock");
 await fs.mkdir(apmHomeDir, { recursive: true });
 
 const daemonEnv = {
@@ -72,8 +78,17 @@ try {
 
 process.stdout.write("Binary smoke test passed.\n");
 
+function preparePlatformBinary(binPath) {
+  if (process.platform === "darwin") {
+    spawnSync("xattr", ["-cr", binPath], { stdio: "ignore" });
+    spawnSync("codesign", ["--force", "--sign", "-", "--options", "runtime", "--timestamp=none", binPath], {
+      stdio: "ignore",
+    });
+  }
+}
+
 function assertHelp(binPath, args, expectedToken) {
-  const out = spawnSync(binPath, args, { cwd: root, encoding: "utf8" });
+  const out = spawnSync(binPath, args, { cwd: root, encoding: "utf8", timeout: 15_000 });
   if (out.status !== 0) {
     throw new Error(`Help command failed: ${binPath} ${args.join(" ")} => ${out.stderr || out.stdout}`);
   }
@@ -92,6 +107,10 @@ async function ensureExecutable(filePath) {
 }
 
 async function waitForSocket(socketPath, timeoutMs) {
+  if (process.platform === "win32") {
+    await sleep(1500);
+    return;
+  }
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {

@@ -42,6 +42,15 @@ jobs:
       - name: Build SEA binaries for current platform
         run: npm run build:bin
 
+      - name: Sign macOS binaries
+        if: runner.os == 'macOS'
+        run: |
+          for f in dist/bin/apm-darwin-* dist/bin/apm-daemon-darwin-*; do
+            [ -f "$f" ] || continue
+            xattr -cr "$f" || true
+            codesign --force --sign - --options runtime --timestamp=none "$f"
+          done
+
       - name: Run tests
         run: npm test
 

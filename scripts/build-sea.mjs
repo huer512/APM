@@ -11,6 +11,9 @@ const TARGET_MATRIX = [
   { id: "win32-x64", os: "win32", arch: "x64", ext: ".exe" },
 ];
 
+const SENTINEL_FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
+const POSTJECT_CLI = path.join(process.cwd(), "node_modules", "postject", "dist", "cli.js");
+
 const root = process.cwd();
 const bundleDir = path.join(root, "dist/bundle");
 const outputDir = path.join(root, "dist/bin");
@@ -123,28 +126,61 @@ async function buildSeaBinary({ name, bundlePath, outputPath, assets, assetsMani
 
   await fs.writeFile(seaConfigPath, JSON.stringify(config, null, 2), "utf8");
 
-  // Native --build-sea on macOS can produce binaries that exit silently; postject is reliable.
-  const preferPostject = process.platform === "darwin";
-  if (!preferPostject) {
-    const buildSea = spawnSync(process.execPath, ["--build-sea", seaConfigPath], {
-      cwd: root,
-      encoding: "utf8",
-    });
+  const hasEmbeddedAssets = Object.keys(assets).length > 0;
+  // Daemon bundles embed native assets; postject is required on macOS and when native build fails.
+  const preferPostjectFirst = hasEmbeddedAssets && process.platform === "darwin";
 
-    if (buildSea.status === 0) {
-      await ensureFile(outputPath, `SEA output missing for ${name}`);
-      await fs.chmod(outputPath, 0o755);
-      return;
-    }
+  if (preferPostjectFirst) {
+    await buildSeaWithPostject({ name, outputPath, assets, seaConfigPath });
+    await finalizeBinary(outputPath);
+    verifyBinaryHelp(outputPath, name);
+    process.stdout.write(`Built ${name} via postject (${process.platform}).\n`);
+    return;
   }
 
-  await buildSeaWithPostject({ name, bundlePath, outputPath, assets, assetsManifest, seaConfigPath });
+  const nativeError = await tryNativeBuildSea(seaConfigPath, outputPath);
+  if (nativeError === null) {
+    await finalizeBinary(outputPath);
+    try {
+      verifyBinaryHelp(outputPath, name);
+      process.stdout.write(`Built ${name} via --build-sea.\n`);
+      return;
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : error}\n`);
+      await removeOutputIfExists(outputPath);
+    }
+  } else {
+    process.stderr.write(`Native --build-sea failed for ${name}: ${nativeError}\n`);
+  }
+
+  await buildSeaWithPostject({ name, outputPath, assets, seaConfigPath });
+  await finalizeBinary(outputPath);
+  verifyBinaryHelp(outputPath, name);
+  process.stdout.write(`Built ${name} via postject fallback.\n`);
 }
 
-async function buildSeaWithPostject({ name, bundlePath, outputPath, assets, assetsManifest, seaConfigPath }) {
+async function tryNativeBuildSea(seaConfigPath, outputPath) {
+  const buildSea = spawnSync(process.execPath, ["--build-sea", seaConfigPath], {
+    cwd: root,
+    encoding: "utf8",
+  });
+
+  if (buildSea.status !== 0) {
+    return (buildSea.stderr || buildSea.stdout || `exit ${buildSea.status}`).trim();
+  }
+
+  try {
+    await ensureFile(outputPath, `SEA output missing at ${outputPath}`);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function buildSeaWithPostject({ name, outputPath, assets, seaConfigPath }) {
   const blobPath = path.join(bundleDir, `${name}.sea-prep.blob`);
   const postjectConfig = {
-    main: path.resolve(bundlePath),
+    main: JSON.parse(await fs.readFile(seaConfigPath, "utf8")).main,
     mainFormat: "commonjs",
     output: path.resolve(blobPath),
     disableExperimentalSEAWarning: true,
@@ -168,31 +204,74 @@ async function buildSeaWithPostject({ name, bundlePath, outputPath, assets, asse
 
   await removeOutputIfExists(outputPath);
   await fs.copyFile(process.execPath, outputPath);
-  const postject = spawnSync(
-    "npx",
+
+  const postject = runPostject(outputPath, blobPath);
+  if (postject.status !== 0) {
+    throw new Error(
+      [
+        `postject failed for ${name}.`,
+        postject.stderr || postject.stdout || "",
+        `cmd: ${process.execPath} ${POSTJECT_CLI}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+}
+
+function runPostject(outputPath, blobPath) {
+  return spawnSync(
+    process.execPath,
     [
-      "postject",
-      outputPath,
+      POSTJECT_CLI,
+      path.resolve(outputPath),
       "NODE_SEA_BLOB",
-      blobPath,
+      path.resolve(blobPath),
       "--sentinel-fuse",
-      "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2",
+      SENTINEL_FUSE,
       "--overwrite",
     ],
-    { cwd: root, encoding: "utf8" },
+    {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true,
+    },
   );
-  if (postject.status !== 0) {
-    throw new Error((postject.stderr || postject.stdout || `postject failed for ${name}`).trim());
-  }
+}
 
-  if (assetsManifest) {
-    process.stdout.write(`Built ${name} via postject fallback.\n`);
-  }
-
+async function finalizeBinary(outputPath) {
   if (process.platform === "darwin") {
-    spawnSync("codesign", ["--sign", "-", outputPath], { stdio: "inherit" });
+    spawnSync("xattr", ["-cr", outputPath], { stdio: "ignore" });
+    const signed = spawnSync(
+      "codesign",
+      ["--force", "--sign", "-", "--options", "runtime", "--timestamp=none", outputPath],
+      { encoding: "utf8" },
+    );
+    if (signed.status !== 0) {
+      throw new Error(`codesign failed for ${outputPath}: ${signed.stderr || signed.stdout || ""}`.trim());
+    }
   }
-  await fs.chmod(outputPath, 0o755);
+  if (process.platform !== "win32") {
+    await fs.chmod(outputPath, 0o755);
+  }
+}
+
+function verifyBinaryHelp(outputPath, name) {
+  const result = spawnSync(outputPath, ["--help"], {
+    encoding: "utf8",
+    timeout: 15_000,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || `exit ${result.status ?? "unknown"}`).trim();
+    throw new Error(`SEA binary ${name} failed --help verification at ${outputPath}: ${detail}`);
+  }
+  const text = `${result.stdout}\n${result.stderr}`;
+  const expected = name === "apm-daemon" ? "apm-daemon" : "apm";
+  if (!text.includes(expected)) {
+    throw new Error(`SEA binary ${name} --help output missing "${expected}": ${text.slice(0, 200)}`);
+  }
+  return true;
 }
 
 function resolveSelectedTargets(args, current) {

@@ -48,3 +48,14 @@ jobs:
 
       - name: Build Tauri app
         run: npm run desktop:build
+
+      - name: Upload desktop bundles
+        uses: actions/upload-artifact@v7
+        with:
+          name: apm-desktop-linux-x64
+          path: |
+            apps/apm-desktop/src-tauri/target/release/bundle/deb/*.deb
+            apps/apm-desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            apps/apm-desktop/src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: error
+          retention-days: 14
