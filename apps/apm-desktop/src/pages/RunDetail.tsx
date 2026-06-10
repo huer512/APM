@@ -1,141 +1,156 @@
-import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import * as api from "../lib/api";
 import { useApp } from "../context/AppContext";
-import type { ApmEvent, RunRecord } from "../lib/types";
+import type { RunDetailResponse } from "../lib/types";
 import { AttachPanel } from "./AttachPanel";
+import { PageHeader, StatusBadge, formatDate, formatDuration } from "../components/UI";
 
 export function RunDetail() {
   const { runId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get("tab") === "attach" ? "attach" : "logs";
+  const navigate = useNavigate();
+  const tab = searchParams.get("tab") === "attach" ? "attach" : "overview";
   const { daemonStatus } = useApp();
-  const [run, setRun] = useState<RunRecord | null>(null);
-  const [events, setEvents] = useState<ApmEvent[]>([]);
-  const [logText, setLogText] = useState("");
-  const [kindFilter, setKindFilter] = useState("");
+  const [detail, setDetail] = useState<RunDetailResponse | null>(null);
+
+  const load = async () => {
+    if (!runId) {
+      return;
+    }
+    setDetail(await api.fetchRunDetail(runId));
+  };
+
   useEffect(() => {
     if (!daemonStatus?.httpReachable || !runId) {
       return;
     }
-    void api.fetchRun(runId).then(setRun);
+    void load();
+    let unsubscribe: (() => void) | undefined;
+    unsubscribe = api.subscribeRunEvents(
+      runId,
+      detail?.events.length ? Math.max(...detail.events.map((event) => event.seq)) : 0,
+      () => void load(),
+      () => undefined,
+    );
+    const timer = setInterval(() => void load(), 3000);
+    return () => {
+      unsubscribe?.();
+      clearInterval(timer);
+    };
   }, [daemonStatus?.httpReachable, runId]);
 
-  useEffect(() => {
-    if (!daemonStatus?.httpReachable || !runId || tab !== "logs") {
+  const run = detail?.run;
+  const latestMessages = useMemo(() => (detail?.messages ?? []).slice(-12), [detail?.messages]);
+
+  const stop = async () => {
+    if (!runId) {
       return;
     }
+    await api.stopRun(runId);
+    await load();
+  };
 
-    let cancelled = false;
-    let unsubscribe: (() => void) | undefined;
-
-    void (async () => {
-      const result = await api.fetchLogs(runId, 0, kindFilter || undefined);
-      if (cancelled) {
-        return;
-      }
-      setEvents(result.events);
-      setLogText(result.text);
-      const last = result.events[result.events.length - 1];
-      let seq = last ? last.seq + 1 : 0;
-
-      unsubscribe = api.subscribeRunEvents(
-        runId,
-        seq,
-        (payload) => {
-          setRun(payload.run);
-          if (payload.events.length > 0) {
-            setEvents((prev) => {
-              const merged = [...prev, ...payload.events];
-              return kindFilter ? merged.filter((e) => e.kind === kindFilter) : merged;
-            });
-            if (payload.chunk) {
-              setLogText((prev) => prev + payload.chunk);
-            }
-          }
-          seq = payload.nextSeq;
-        },
-        () => undefined,
-      );
-    })();
-
-    return () => {
-      cancelled = true;
-      unsubscribe?.();
-    };
-  }, [daemonStatus?.httpReachable, runId, tab, kindFilter]);
-
-  if (!runId) {
-    return <p>缺少 run ID</p>;
-  }
+  const retry = async () => {
+    if (!runId) {
+      return;
+    }
+    const result = await api.retryRun(runId);
+    navigate(`/runs/${result.runId}`);
+  };
 
   return (
     <div>
-      <p>
-        <Link to="/runs">← 返回列表</Link>
-      </p>
-      <h1 className="page-title">Run {runId}</h1>
+      <p className="breadcrumb"><Link to="/runs">运行实例</Link> / {runId}</p>
+      <PageHeader
+        title={runId}
+        actions={
+          <>
+            {run && <StatusBadge status={run.status} />}
+            {(run?.status === "running" || run?.status === "paused") && <button type="button" onClick={() => void stop()}>停止运行</button>}
+            {run && (run.status === "failed" || run.status === "finished" || run.status === "stopped") && <button type="button" className="primary" onClick={() => void retry()}>重新运行</button>}
+            <button type="button" onClick={() => setSearchParams({ tab: "attach" })}>Attach 人工介入</button>
+          </>
+        }
+      />
       {run && (
-        <div className="card">
-          <p>
-            Entry: {run.entryName} · 状态: <span className={`badge ${run.status}`}>{run.status}</span>
-          </p>
-          <p style={{ color: "var(--text-muted)" }}>
-            Host: {run.hostName || "-"} · Stage: {run.currentStage ?? "-"} · Prompt: {run.currentPrompt ?? "-"}
-          </p>
-          {run.error && <p style={{ color: "var(--danger)" }}>{run.error}</p>}
+        <div className="run-meta-bar">
+          <span>工作流 <strong>{run.entryName}</strong></span>
+          <span>开始时间 <strong>{formatDate(run.startedAt ?? run.createdAt)}</strong></span>
+          <span>运行时长 <strong>{formatDuration(run.startedAt, run.finishedAt)}</strong></span>
+          <span>主机 <strong>{run.hostName || "-"}</strong></span>
+          <span>执行阶段 <strong>{run.currentStage ?? "-"}</strong></span>
         </div>
       )}
-
       <div className="tabs">
-        <button
-          type="button"
-          className={tab === "logs" ? "active" : ""}
-          onClick={() => setSearchParams({})}
-        >
-          日志
-        </button>
-        <button
-          type="button"
-          className={tab === "attach" ? "active" : ""}
-          onClick={() => setSearchParams({ tab: "attach" })}
-        >
-          Attach / HITL
-        </button>
+        <button type="button" className={tab === "overview" ? "active" : ""} onClick={() => setSearchParams({})}>运行详情</button>
+        <button type="button" className={tab === "attach" ? "active" : ""} onClick={() => setSearchParams({ tab: "attach" })}>人工介入</button>
       </div>
 
-      {tab === "logs" && (
+      {tab === "attach" && <AttachPanel runId={runId} />}
+      {tab === "overview" && detail && (
         <>
-          <div className="toolbar">
-            <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
-              <option value="">全部事件</option>
-              <option value="run">run</option>
-              <option value="stage">stage</option>
-              <option value="tool">tool</option>
-              <option value="prompt">prompt</option>
-            </select>
-          </div>
-          <div className="card">
-            <h4>结构化事件 ({events.length})</h4>
-            <div className="log-view" style={{ maxHeight: 200 }}>
-              {events.slice(-40).map((ev) => (
-                <details key={ev.seq} style={{ marginBottom: 4 }}>
-                  <summary>
-                    #{ev.seq} [{ev.kind}] {ev.level}
-                  </summary>
-                  <pre style={{ margin: 4, whiteSpace: "pre-wrap" }}>{JSON.stringify(ev.data, null, 2)}</pre>
-                </details>
-              ))}
-            </div>
-          </div>
-          <div className="card">
-            <h4>日志流</h4>
-            <div className="log-view">{logText || "等待事件…"}</div>
+          {detail.failure && (
+            <section className="panel failure-panel">
+              <h2>运行失败</h2>
+              <p>{detail.failure.message}</p>
+              <dl className="detail-list horizontal">
+                <dt>失败阶段</dt><dd>{detail.failure.stage ?? "-"}</dd>
+                <dt>失败 Agent</dt><dd>{detail.failure.prompt ?? "-"}</dd>
+              </dl>
+            </section>
+          )}
+          <div className="run-detail-grid">
+            <section className="panel">
+              <h2>阶段与 Agent</h2>
+              <div className="stage-list">
+                {detail.stages.map((stage) => (
+                  <div key={stage.name} className={run?.currentStage === stage.name ? "active" : ""}>
+                    <strong>{stage.name}</strong>
+                    <span>{stage.status}</span>
+                    <small>{stage.prompts.join(", ") || "暂无 Agent"}</small>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section className="panel">
+              <h2>消息</h2>
+              <div className="message-list">
+                {latestMessages.map((item, index) => (
+                  <article key={`${item.createdAt}-${index}`} className={item.role}>
+                    <header>
+                      <strong>{item.prompt}</strong>
+                      <span>{item.role} · {formatDate(item.createdAt)}</span>
+                    </header>
+                    <p>{item.content}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+            <aside className="side-stack">
+              <section className="panel">
+                <h2>工具调用 ({detail.tools.length})</h2>
+                <div className="event-list">
+                  {detail.tools.slice(-8).map((event) => (
+                    <div key={event.seq}>
+                      <strong>{String(event.data.name ?? event.kind)}</strong>
+                      <span>{String(event.data.status ?? event.level)}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <section className="panel">
+                <h2>实时日志</h2>
+                <div className="log-view">
+                  {detail.events.slice(-30).map((event) => (
+                    <div key={event.seq}>#{event.seq} [{event.level}] {event.kind} {event.stage ?? ""} {event.prompt ?? ""} {String(event.data.action ?? event.data.detail ?? event.data.error ?? "")}</div>
+                  ))}
+                </div>
+              </section>
+            </aside>
           </div>
         </>
       )}
-
-      {tab === "attach" && <AttachPanel runId={runId} />}
     </div>
   );
 }

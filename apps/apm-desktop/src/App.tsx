@@ -2,9 +2,13 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppProvider, useApp } from "./context/AppContext";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./pages/Dashboard";
+import { Workflows } from "./pages/Workflows";
 import { Runs } from "./pages/Runs";
 import { RunDetail } from "./pages/RunDetail";
+import { Intervention } from "./pages/Intervention";
 import { Studio } from "./pages/Studio";
+import { Hosts } from "./pages/Hosts";
+import { Logs } from "./pages/Logs";
 import { Settings } from "./pages/Settings";
 
 function AppRoutes() {
@@ -21,23 +25,20 @@ function AppRoutes() {
   return (
     <>
       {error && (
-        <div
-          style={{
-            background: "rgba(239,68,68,0.15)",
-            borderBottom: "1px solid var(--danger)",
-            padding: "8px 16px",
-            color: "#fca5a5",
-          }}
-        >
+        <div className="notice danger">
           {error}
         </div>
       )}
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
+          <Route path="workflows" element={<Workflows />} />
           <Route path="runs" element={<Runs />} />
           <Route path="runs/:runId" element={<RunDetail />} />
+          <Route path="intervention" element={<Intervention />} />
           <Route path="studio" element={<Studio />} />
+          <Route path="hosts" element={<Hosts />} />
+          <Route path="logs" element={<Logs />} />
           <Route path="settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

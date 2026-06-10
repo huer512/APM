@@ -29,6 +29,18 @@ test("http health and runs api", async () => {
     assert.equal(health.status, 200);
     const healthBody = (await health.json()) as { ok: boolean };
     assert.equal(healthBody.ok, true);
+    assert.equal(health.headers.get("access-control-allow-origin"), "*");
+
+    const preflight = await fetch(`${baseUrl}/catalog`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:1420",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "Authorization",
+      },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-headers"), "Authorization,Content-Type,X-APM-Token");
 
     const catalogRes = await fetch(`${baseUrl}/catalog`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -36,6 +48,28 @@ test("http health and runs api", async () => {
     assert.equal(catalogRes.status, 200);
     const catalog = (await catalogRes.json()) as { entries: unknown[] };
     assert.ok(Array.isArray(catalog.entries));
+
+    const summaryRes = await fetch(`${baseUrl}/desktop/summary`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(summaryRes.status, 200);
+    const summary = (await summaryRes.json()) as { counts: { runs: number }; health: unknown[] };
+    assert.equal(summary.counts.runs, 0);
+    assert.ok(Array.isArray(summary.health));
+
+    const workflowsRes = await fetch(`${baseUrl}/workflows`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(workflowsRes.status, 200);
+    const workflows = (await workflowsRes.json()) as { workflows: unknown[] };
+    assert.ok(Array.isArray(workflows.workflows));
+
+    const hostsRes = await fetch(`${baseUrl}/hosts`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(hostsRes.status, 200);
+    const hosts = (await hostsRes.json()) as { hosts: unknown[] };
+    assert.ok(Array.isArray(hosts.hosts));
 
     const runRes = await fetch(`${baseUrl}/runs`, {
       method: "POST",
@@ -69,6 +103,22 @@ test("http health and runs api", async () => {
     assert.equal(logsRes.status, 200);
     const logs = (await logsRes.json()) as { events: unknown[] };
     assert.ok(logs.events.length > 0);
+
+    const detailRes = await fetch(`${baseUrl}/runs/${runId}/detail`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(detailRes.status, 200);
+    const detail = (await detailRes.json()) as { run: { id: string }; events: unknown[] };
+    assert.equal(detail.run.id, runId);
+    assert.ok(detail.events.length > 0);
+
+    const eventsRes = await fetch(`${baseUrl}/events?limit=5`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(eventsRes.status, 200);
+    const events = (await eventsRes.json()) as { events: unknown[]; total: number };
+    assert.ok(events.total > 0);
+    assert.ok(events.events.length > 0);
   } finally {
     await server.stop();
     await fs.rm(root, { recursive: true, force: true });

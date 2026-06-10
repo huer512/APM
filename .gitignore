@@ -7,4 +7,6 @@ dist/
 !.env.example
 .apm/
 apps/apm-desktop/src-tauri/target/
+apps/apm-desktop/src-tauri/bin/
+apps/apm-desktop/src-tauri/gen/
 apps/apm-desktop/dist/

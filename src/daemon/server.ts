@@ -4,9 +4,16 @@ import { promises as fs } from "node:fs";
 import { formatEvents } from "../logging/format-events.js";
 import { RunStore } from "../state/run-store.js";
 import type { ApmEvent } from "../types/events.js";
-import type { AttachSnapshot, Dict, RunRecord } from "../types.js";
+import type {
+  AttachSnapshot,
+  Dict,
+  EntryDefinition,
+  HostDefinition,
+  RunRecord,
+  StageDefinition,
+} from "../types.js";
 import { decodeRpcLines, encodeRpc, type RpcRequest, type RpcResponse } from "./rpc.js";
-import { buildCatalog, loadWorkflowBundle } from "../config/loaders.js";
+import { buildCatalog, loadEntry, loadHost, loadStage, loadWorkflowBundle } from "../config/loaders.js";
 import { HostExecutor } from "../engine/host-executor.js";
 import { AgentRunner } from "../engine/agent-runner.js";
 import { HitlController } from "../engine/hitl-controller.js";
@@ -41,6 +48,61 @@ export interface ConfigGetResponse {
   http: ApmConfigFile["http"];
   apmHome: string;
   httpBaseUrl?: string;
+}
+
+export interface DesktopSummaryResponse {
+  daemon: {
+    ok: boolean;
+    httpBaseUrl?: string;
+    apmHome: string;
+    version: string;
+  };
+  counts: {
+    workflows: number;
+    runs: number;
+    running: number;
+    paused: number;
+    finished: number;
+    failed: number;
+    stopped: number;
+    waitingForInput: number;
+    hosts: number;
+  };
+  recentRuns: RunRecord[];
+  health: Array<{ name: string; status: "ok" | "warn" | "error"; detail: string }>;
+}
+
+export interface WorkflowSummary {
+  name: string;
+  path: string;
+  entryStage?: string;
+  host?: string;
+  variables: Dict;
+  description: string;
+  status: "valid" | "invalid";
+  error?: string;
+}
+
+export interface WorkflowDetail extends WorkflowSummary {
+  stages: Array<StageDefinition & { path: string }>;
+  prompts: Array<{ name: string; path: string; model: string; body: string; metadata: Dict }>;
+  hostDefinition?: HostDefinition;
+}
+
+export interface ValidationIssue {
+  level: "error" | "warning" | "info";
+  type: string;
+  message: string;
+  location: string;
+  node?: string;
+  status: "open" | "ignored";
+}
+
+export interface ValidationResponse {
+  workflow: string;
+  ok: boolean;
+  checkedAt: string;
+  issues: ValidationIssue[];
 }
 
 export class ApmDaemonServer {
@@ -168,8 +230,20 @@ export class ApmDaemonServer {
         return this.store.listRuns(Boolean(params.all));
       case "logs":
         return this.readLogsRpc(params);
+      case "events":
+        return this.listEvents(params);
       case "catalog":
         return this.getCatalog();
+      case "desktop.summary":
+        return this.getDesktopSummary();
+      case "workflows":
+        return this.listWorkflows();
+      case "workflow.get":
+        return this.getWorkflow(asString(params.name, "name"));
+      case "workflow.validate":
+        return this.validateWorkflow(asString(params.name, "name"));
+      case "hosts":
+        return this.listHosts();
       case "config.get":
         return this.getConfig();
       case "config.set":
@@ -188,6 +262,12 @@ export class ApmDaemonServer {
           asString(params.prompt, "prompt"),
           asString(params.message, "message"),
         );
+      case "run.detail":
+        return this.getRunDetail(asString(params.runId, "runId"));
+      case "run.stop":
+        return this.stopRun(asString(params.runId, "runId"));
+      case "run.retry":
+        return this.retryRun(asString(params.runId, "runId"));
       default:
         throw new Error(`Unknown RPC method: ${method}`);
     }
@@ -217,8 +297,184 @@ export class ApmDaemonServer {
       hasApiKey: key.trim().length > 0,
       http: config.http,
       apmHome: this.root,
-      httpBaseUrl: listen.enabled ? `http://${listen.host}:${listen.port}` : undefined,
+      httpBaseUrl: listen.enabled ? (this.httpServer?.baseUrl ?? `http://${listen.host}:${listen.port}`) : undefined,
     };
+  }
+
+  private async getDesktopSummary(): Promise<DesktopSummaryResponse> {
+    const [catalog, config, runs] = await Promise.all([
+      buildCatalog(this.root),
+      this.getConfig(),
+      this.store.listRuns(true),
+    ]);
+    const counts = {
+      workflows: catalog.entries.size,
+      runs: runs.length,
+      running: runs.filter((run) => run.status === "running").length,
+      paused: runs.filter((run) => run.status === "paused").length,
+      finished: runs.filter((run) => run.status === "finished").length,
+      failed: runs.filter((run) => run.status === "failed").length,
+      stopped: runs.filter((run) => run.status === "stopped").length,
+      waitingForInput: runs.filter((run) => run.waitingForNext || run.attachMode).length,
+      hosts: catalog.hosts.size,
+    };
+    const health: DesktopSummaryResponse["health"] = [
+      {
+        name: "Daemon 服务",
+        status: "ok",
+        detail: "运行中",
+      },
+      {
+        name: "HTTP API",
+        status: config.http?.enabled ? "ok" : "warn",
+        detail: config.httpBaseUrl ?? "未启用",
+      },
+      {
+        name: "Cursor API Key",
+        status: config.hasApiKey ? "ok" : "warn",
+        detail: config.hasApiKey ? "已配置" : "未配置",
+      },
+      {
+        name: "APM_HOME",
+        status: "ok",
+        detail: this.root,
+      },
+      {
+        name: "工作流配置目录",
+        status: counts.workflows > 0 ? "ok" : "warn",
+        detail: counts.workflows > 0 ? `${counts.workflows} 个工作流` : "暂无 entries",
+      },
+    ];
+    return {
+      daemon: {
+        ok: true,
+        httpBaseUrl: config.httpBaseUrl,
+        apmHome: this.root,
+        version: "0.1.0",
+      },
+      counts,
+      recentRuns: runs.slice(0, 6),
+      health,
+    };
+  }
+
+  private async listWorkflows(): Promise<{ workflows: WorkflowSummary[] }> {
+    const catalog = await buildCatalog(this.root);
+    const workflows: WorkflowSummary[] = [];
+    for (const [name, filePath] of catalog.entries.entries()) {
+      try {
+        const entry = await loadEntry(name, filePath);
+        workflows.push({
+          name,
+          path: path.relative(this.root, filePath),
+          entryStage: entry.entry,
+          host: entry.host,
+          variables: entry.variables,
+          description: entry.description,
+          status: "valid",
+        });
+      } catch (error) {
+        workflows.push({
+          name,
+          path: path.relative(this.root, filePath),
+          variables: {},
+          description: "",
+          status: "invalid",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    workflows.sort((a, b) => a.name.localeCompare(b.name));
+    return { workflows };
+  }
+
+  private async getWorkflow(name: string): Promise<{ workflow: WorkflowDetail }> {
+    const catalog = await buildCatalog(this.root);
+    const entryPath = mustCatalog(catalog.entries, name, "entry");
+    const entry = await loadEntry(name, entryPath);
+    const bundle = await loadWorkflowBundle(this.root, name);
+    return {
+      workflow: {
+        name,
+        path: path.relative(this.root, entryPath),
+        entryStage: entry.entry,
+        host: entry.host,
+        variables: entry.variables,
+        description: entry.description,
+        status: "valid",
+        stages: [...bundle.stages.values()].map((stage) => ({
+          ...stage,
+          path: path.relative(this.root, stage.path),
+        })),
+        prompts: [...bundle.prompts.values()].map((prompt) => ({
+          ...prompt,
+          path: path.relative(this.root, prompt.path),
+        })),
+        hostDefinition: {
+          ...bundle.host,
+          path: path.relative(this.root, bundle.host.path),
+        },
+      },
+    };
+  }
+
+  private async validateWorkflow(name: string): Promise<ValidationResponse> {
+    const issues: ValidationIssue[] = [];
+    try {
+      const { workflow } = await this.getWorkflow(name);
+      if (Object.keys(workflow.variables).length === 0) {
+        issues.push({
+          level: "info",
+          type: "variables",
+          message: "工作流未声明运行参数",
+          location: workflow.path,
+          status: "ignored",
+        });
+      }
+      for (const stage of workflow.stages) {
+        if (stage.prompts.length === 0) {
+          issues.push({
+            level: "error",
+            type: "stage.prompts",
+            message: `阶段 "${stage.name}" 没有提示词`,
+            location: stage.path,
+            node: stage.name,
+            status: "open",
+          });
+        }
+      }
+    } catch (error) {
+      issues.push({
+        level: "error",
+        type: "workflow.load",
+        message: error instanceof Error ? error.message : String(error),
+        location: `entries/${name}.md`,
+        status: "open",
+      });
+    }
+    return {
+      workflow: name,
+      ok: !issues.some((issue) => issue.level === "error"),
+      checkedAt: new Date().toISOString(),
+      issues,
+    };
+  }
+
+  private async listHosts(): Promise<{ hosts: Array<HostDefinition & { status: "local" | "configured"; path: string }> }> {
+    const catalog = await buildCatalog(this.root);
+    const hosts = [];
+    for (const [name, filePath] of catalog.hosts.entries()) {
+      const host = await loadHost(name, filePath, this.root);
+      const status: "local" | "configured" =
+        host.host === "localhost" || host.host === "127.0.0.1" ? "local" : "configured";
+      hosts.push({
+        ...host,
+        path: path.relative(this.root, host.path),
+        status,
+      });
+    }
+    hosts.sort((a, b) => a.name.localeCompare(b.name));
+    return { hosts };
   }
 
   private async setConfig(params: Record<string, unknown>): Promise<ConfigGetResponse> {
@@ -308,7 +564,7 @@ export class ApmDaemonServer {
   }> {
     const run = await mustRun(this.store, runId);
     const { events, chunk, nextSeq } = await this.store.readLogsSlice(runId, fromSeq);
-    const done = run.status === "finished" || run.status === "failed";
+    const done = run.status === "finished" || run.status === "failed" || run.status === "stopped";
     return {
       run,
       events,
@@ -328,6 +584,104 @@ export class ApmDaemonServer {
       events,
       text: formatEvents(events),
     };
+  }
+
+  private async listEvents(params: Record<string, unknown>): Promise<{ events: ApmEvent[]; total: number }> {
+    const limit = asNumber(params.limit, "limit", 100);
+    const offset = asNumber(params.offset, "offset", 0);
+    const runId = typeof params.runId === "string" && params.runId.trim() ? params.runId.trim() : undefined;
+    const level = typeof params.level === "string" && params.level.trim()
+      ? (params.level.trim() as ApmEvent["level"])
+      : undefined;
+    const kind = typeof params.kind === "string" && params.kind.trim()
+      ? (params.kind.trim() as ApmEvent["kind"])
+      : undefined;
+    const query = typeof params.query === "string" ? params.query : undefined;
+    return this.store.listEvents({ runId, level, kind, query, limit, offset });
+  }
+
+  private async getRunDetail(runId: string): Promise<{
+    run: RunRecord;
+    events: ApmEvent[];
+    stages: Array<{ name: string; status: string; prompts: string[]; durationMs?: number }>;
+    tools: ApmEvent[];
+    messages: RunRecord["messageHistory"];
+    failure?: { message: string; stage?: string; prompt?: string };
+  }> {
+    const run = await mustRun(this.store, runId);
+    const events = await this.store.readEvents(runId, 0);
+    const stageNames = new Set<string>();
+    for (const event of events) {
+      if (event.stage) {
+        stageNames.add(event.stage);
+      }
+    }
+    for (const item of run.promptHistory) {
+      stageNames.add(item.stage);
+    }
+    if (run.currentStage) {
+      stageNames.add(run.currentStage);
+    }
+    const stages = [...stageNames].map((stageName) => {
+      const prompts = [
+        ...new Set([
+          ...run.promptHistory.filter((item) => item.stage === stageName).map((item) => item.prompt),
+          ...run.messageHistory.filter((item) => item.stage === stageName).map((item) => item.prompt),
+        ]),
+      ];
+      return {
+        name: stageName,
+        status: run.currentStage === stageName ? run.status : "completed",
+        prompts,
+      };
+    });
+    const lastError = [...events].reverse().find((event) => event.level === "error");
+    return {
+      run,
+      events,
+      stages,
+      tools: events.filter((event) => event.kind === "tool"),
+      messages: run.messageHistory,
+      failure: run.error || lastError
+        ? {
+            message: run.error ?? String(lastError?.data.error ?? lastError?.data.detail ?? "运行失败"),
+            stage: lastError?.stage ?? run.currentStage,
+            prompt: lastError?.prompt ?? run.currentPrompt,
+          }
+        : undefined,
+    };
+  }
+
+  private async stopRun(runId: string): Promise<{ run: RunRecord }> {
+    const run = await mustRun(this.store, runId);
+    if (run.status !== "running" && run.status !== "paused") {
+      return { run };
+    }
+    await this.runner.closeByPrefix(`${runId}.`);
+    const updated = await this.store.updateRun(runId, {
+      status: "stopped",
+      finishedAt: new Date().toISOString(),
+      waitingForNext: false,
+      activeBatch: [],
+      error: "Stopped by user",
+    });
+    await this.store.appendEvent(runId, {
+      runId,
+      level: "warn",
+      kind: "run",
+      data: { action: "stopped", detail: "Stopped by user" },
+    });
+    return { run: updated };
+  }
+
+  private async retryRun(runId: string): Promise<{ runId: string }> {
+    const run = await mustRun(this.store, runId);
+    return this.handleRun({
+      entryName: run.entryName,
+      params: run.variables,
+      attach: run.attachMode,
+      detach: true,
+    });
   }
 
   private async executeRun(runId: string, entryName: string): Promise<void> {
@@ -434,6 +788,14 @@ function mapToList(map: Map<string, string>, root: string): Array<{ name: string
       path: path.relative(root, filePath),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function mustCatalog(map: Map<string, string>, name: string, kind: string): string {
+  const found = map.get(name);
+  if (!found) {
+    throw new Error(`Cannot find ${kind} "${name}" in configured directory.`);
+  }
+  return found;
 }
 
 function asString(value: unknown, field: string): string {

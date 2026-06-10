@@ -1,5 +1,6 @@
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { URL } from "node:url";
 import type { ApmDaemonServer } from "./server.js";
 import type { ApmEvent } from "../types/events.js";
@@ -20,6 +21,7 @@ export class ApmHttpServer {
   private readonly daemon: ApmDaemonServer;
   private server?: http.Server;
   private listenPort = 0;
+  private readonly sockets = new Set<Socket>();
 
   public constructor(options: ApmHttpServerOptions) {
     this.host = options.host;
@@ -36,6 +38,12 @@ export class ApmHttpServer {
   public async start(): Promise<void> {
     this.server = http.createServer((req, res) => {
       void this.handle(req, res);
+    });
+    this.server.on("connection", (socket) => {
+      this.sockets.add(socket);
+      socket.on("close", () => {
+        this.sockets.delete(socket);
+      });
     });
     await new Promise<void>((resolve, reject) => {
       this.server?.once("error", reject);
@@ -55,6 +63,9 @@ export class ApmHttpServer {
     if (!this.server) {
       return;
     }
+    for (const socket of this.sockets) {
+      socket.destroy();
+    }
     await new Promise<void>((resolve, reject) => {
       this.server?.close((err) => (err ? reject(err) : resolve()));
     });
@@ -70,6 +81,11 @@ export class ApmHttpServer {
       }
 
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
+      if (req.method === "OPTIONS") {
+        sendEmpty(res, 204);
+        return;
+      }
+
       const queryToken = url.searchParams.get("token") ?? undefined;
       if (url.pathname === "/health") {
         sendJson(res, 200, {
@@ -88,6 +104,42 @@ export class ApmHttpServer {
       if (url.pathname === "/catalog" && req.method === "GET") {
         const catalog = await this.daemon.handleMethod("catalog", {});
         sendJson(res, 200, catalog);
+        return;
+      }
+
+      if (url.pathname === "/desktop/summary" && req.method === "GET") {
+        const summary = await this.daemon.handleMethod("desktop.summary", {});
+        sendJson(res, 200, summary);
+        return;
+      }
+
+      if (url.pathname === "/workflows" && req.method === "GET") {
+        const workflows = await this.daemon.handleMethod("workflows", {});
+        sendJson(res, 200, workflows);
+        return;
+      }
+
+      const workflowMatch = url.pathname.match(/^\/workflows\/([^/]+)$/);
+      if (workflowMatch && req.method === "GET") {
+        const workflow = await this.daemon.handleMethod("workflow.get", {
+          name: decodeURIComponent(workflowMatch[1]),
+        });
+        sendJson(res, 200, workflow);
+        return;
+      }
+
+      const workflowValidateMatch = url.pathname.match(/^\/workflows\/([^/]+)\/validate$/);
+      if (workflowValidateMatch && req.method === "POST") {
+        const result = await this.daemon.handleMethod("workflow.validate", {
+          name: decodeURIComponent(workflowValidateMatch[1]),
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (url.pathname === "/hosts" && req.method === "GET") {
+        const hosts = await this.daemon.handleMethod("hosts", {});
+        sendJson(res, 200, hosts);
         return;
       }
 
@@ -124,10 +176,44 @@ export class ApmHttpServer {
         return;
       }
 
+      if (url.pathname === "/events" && req.method === "GET") {
+        const result = await this.daemon.handleMethod("events", {
+          runId: url.searchParams.get("runId") ?? undefined,
+          level: url.searchParams.get("level") ?? undefined,
+          kind: url.searchParams.get("kind") ?? undefined,
+          query: url.searchParams.get("query") ?? undefined,
+          limit: Number(url.searchParams.get("limit") ?? "100"),
+          offset: Number(url.searchParams.get("offset") ?? "0"),
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
       const runMatch = url.pathname.match(/^\/runs\/([^/]+)$/);
       if (runMatch && req.method === "GET") {
         const run = await this.daemon.handleMethod("run.get", { runId: runMatch[1] });
         sendJson(res, 200, { run });
+        return;
+      }
+
+      const runDetailMatch = url.pathname.match(/^\/runs\/([^/]+)\/detail$/);
+      if (runDetailMatch && req.method === "GET") {
+        const detail = await this.daemon.handleMethod("run.detail", { runId: runDetailMatch[1] });
+        sendJson(res, 200, detail);
+        return;
+      }
+
+      const runStopMatch = url.pathname.match(/^\/runs\/([^/]+)\/stop$/);
+      if (runStopMatch && req.method === "POST") {
+        const result = await this.daemon.handleMethod("run.stop", { runId: runStopMatch[1] });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      const runRetryMatch = url.pathname.match(/^\/runs\/([^/]+)\/retry$/);
+      if (runRetryMatch && req.method === "POST") {
+        const result = await this.daemon.handleMethod("run.retry", { runId: runRetryMatch[1] });
+        sendJson(res, 201, result);
         return;
       }
 
@@ -200,6 +286,7 @@ export class ApmHttpServer {
 
   private async handleEventStream(res: ServerResponse, runId: string, fromSeq: number): Promise<void> {
     res.writeHead(200, {
+      ...corsHeaders(),
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
@@ -257,10 +344,30 @@ function isLoopback(address: string): boolean {
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
+    ...corsHeaders(),
     "Content-Type": "application/json",
     "Content-Length": Buffer.byteLength(payload),
+    Connection: "close",
   });
   res.end(payload);
+}
+
+function sendEmpty(res: ServerResponse, status: number): void {
+  res.writeHead(status, {
+    ...corsHeaders(),
+    "Content-Length": "0",
+    Connection: "close",
+  });
+  res.end();
+}
+
+function corsHeaders(): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization,Content-Type,X-APM-Token",
+    "Access-Control-Max-Age": "86400",
+  };
 }
 
 function writeSse(res: ServerResponse, event: string, data: unknown): void {

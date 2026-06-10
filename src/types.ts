@@ -60,7 +60,7 @@ export interface PromptMessageRecord {
   meta?: PromptMessageMeta;
 }
 
-export type RunStatus = "running" | "paused" | "finished" | "failed";
+export type RunStatus = "running" | "paused" | "finished" | "failed" | "stopped";
 
 export interface RunRecord {
   id: string;

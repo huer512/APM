@@ -1,4 +1,16 @@
-import type { ApmEvent, AttachSnapshot, Catalog, ConfigResponse, RunRecord } from "./types";
+import type {
+  ApmEvent,
+  AttachSnapshot,
+  Catalog,
+  ConfigResponse,
+  DesktopSummary,
+  HostDefinition,
+  RunDetailResponse,
+  RunRecord,
+  ValidationResponse,
+  WorkflowDetail,
+  WorkflowSummary,
+} from "./types";
 
 let baseUrl = "";
 let token = "";
@@ -39,9 +51,26 @@ export async function fetchRuns(all = false): Promise<RunRecord[]> {
   return data.runs;
 }
 
+export async function fetchSummary(): Promise<DesktopSummary> {
+  return apiFetch("/desktop/summary");
+}
+
 export async function fetchRun(runId: string): Promise<RunRecord> {
   const data = await apiFetch<{ run: RunRecord }>(`/runs/${runId}`);
   return data.run;
+}
+
+export async function fetchRunDetail(runId: string): Promise<RunDetailResponse> {
+  return apiFetch(`/runs/${runId}/detail`);
+}
+
+export async function stopRun(runId: string): Promise<RunRecord> {
+  const data = await apiFetch<{ run: RunRecord }>(`/runs/${runId}/stop`, { method: "POST" });
+  return data.run;
+}
+
+export async function retryRun(runId: string): Promise<{ runId: string }> {
+  return apiFetch(`/runs/${runId}/retry`, { method: "POST" });
 }
 
 export async function createRun(body: {
@@ -113,6 +142,42 @@ export function subscribeRunEvents(
 
 export async function fetchCatalog(): Promise<Catalog> {
   return apiFetch("/catalog");
+}
+
+export async function fetchWorkflows(): Promise<WorkflowSummary[]> {
+  const data = await apiFetch<{ workflows: WorkflowSummary[] }>("/workflows");
+  return data.workflows;
+}
+
+export async function fetchWorkflow(name: string): Promise<WorkflowDetail> {
+  const data = await apiFetch<{ workflow: WorkflowDetail }>(`/workflows/${encodeURIComponent(name)}`);
+  return data.workflow;
+}
+
+export async function validateWorkflow(name: string): Promise<ValidationResponse> {
+  return apiFetch(`/workflows/${encodeURIComponent(name)}/validate`, { method: "POST" });
+}
+
+export async function fetchHosts(): Promise<HostDefinition[]> {
+  const data = await apiFetch<{ hosts: HostDefinition[] }>("/hosts");
+  return data.hosts;
+}
+
+export async function fetchEvents(options: {
+  runId?: string;
+  level?: string;
+  kind?: string;
+  query?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<{ events: ApmEvent[]; total: number }> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined && value !== "") {
+      params.set(key, String(value));
+    }
+  }
+  return apiFetch(`/events?${params}`);
 }
 
 export async function fetchConfig(): Promise<ConfigResponse> {

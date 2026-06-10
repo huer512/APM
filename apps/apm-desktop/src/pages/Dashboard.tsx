@@ -3,145 +3,125 @@ import { Link } from "react-router-dom";
 import * as api from "../lib/api";
 import { importMinimalTemplate, openApmHome } from "../lib/desktop";
 import { useApp } from "../context/AppContext";
-import type { Catalog, RunRecord } from "../lib/types";
+import type { DesktopSummary } from "../lib/types";
+import { EmptyState, PageHeader, StatCard, StatusBadge, formatDate, formatDuration } from "../components/UI";
 
 export function Dashboard() {
-  const { daemonStatus, config, context, startDaemon } = useApp();
-  const [runs, setRuns] = useState<RunRecord[]>([]);
-  const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [entryName, setEntryName] = useState("");
-  const [task, setTask] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { daemonStatus, context, config, startDaemon, restartDaemon } = useApp();
+  const [summary, setSummary] = useState<DesktopSummary | null>(null);
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
+  const load = async () => {
     if (!daemonStatus?.httpReachable) {
       return;
     }
-    void (async () => {
-      const [runList, cat] = await Promise.all([api.fetchRuns(true), api.fetchCatalog()]);
-      setRuns(runList.slice(0, 8));
-      setCatalog(cat);
-      if (cat.entries.length > 0 && !entryName) {
-        setEntryName(cat.entries[0].name);
-      }
-    })();
-  }, [daemonStatus?.httpReachable, entryName]);
-
-  const handleRun = async () => {
-    if (!entryName) {
-      return;
-    }
-    setBusy(true);
-    setMessage("");
-    try {
-      const params: Record<string, unknown> = {};
-      if (task.trim()) {
-        params.task = task.trim();
-      }
-      const { runId } = await api.createRun({ entryName, params, detach: true });
-      setMessage(`已启动 run: ${runId}`);
-      setRuns(await api.fetchRuns(true));
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
+    setSummary(await api.fetchSummary());
   };
+
+  useEffect(() => {
+    void load();
+  }, [daemonStatus?.httpReachable]);
+
+  const counts = summary?.counts;
 
   return (
     <div>
-      <h1 className="page-title">仪表盘</h1>
+      <PageHeader
+        title="总览"
+        actions={
+          <>
+            <button type="button" onClick={() => void load()}>刷新</button>
+            <Link className="button primary" to="/workflows">新建运行</Link>
+          </>
+        }
+      />
 
-      <div className="card">
-        <h3>Daemon</h3>
-        <p>{daemonStatus?.message}</p>
-        <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
-          APM_HOME: {context?.apmHome ?? config?.apmHome ?? "-"}
-        </p>
-        {!daemonStatus?.httpReachable && (
-          <button type="button" className="primary" onClick={() => void startDaemon()}>
-            启动 Daemon
-          </button>
-        )}
+      {!daemonStatus?.httpReachable && (
+        <section className="panel hero-panel">
+          <h2>Daemon 未响应</h2>
+          <p>桌面端需要本机 Daemon 提供运行、日志、配置和 Attach API。</p>
+          <div className="toolbar">
+            <button type="button" className="primary" onClick={() => void startDaemon()}>启动 Daemon</button>
+            <button type="button" onClick={() => void restartDaemon()}>重启 Daemon</button>
+          </div>
+        </section>
+      )}
+
+      <div className="stat-grid">
+        <StatCard label="Daemon 状态" value={daemonStatus?.httpReachable ? "运行中" : "未响应"} detail={summary?.daemon.httpBaseUrl ?? context?.httpBaseUrl ?? "-"} tone={daemonStatus?.httpReachable ? "success" : "danger"} />
+        <StatCard label="工作流数量" value={counts?.workflows ?? 0} detail="entries" tone="accent" />
+        <StatCard label="当前运行" value={(counts?.running ?? 0) + (counts?.paused ?? 0)} detail={`等待人工 ${counts?.waitingForInput ?? 0}`} tone="warning" />
+        <StatCard label="今日失败" value={counts?.failed ?? 0} detail={`已停止 ${counts?.stopped ?? 0}`} tone={(counts?.failed ?? 0) > 0 ? "danger" : "neutral"} />
+        <StatCard label="主机配置" value={counts?.hosts ?? 0} detail="hosts" />
       </div>
 
-      <div className="card">
-        <h3>快速运行</h3>
-        <div className="toolbar">
-          <select value={entryName} onChange={(e) => setEntryName(e.target.value)}>
-            <option value="">选择 entry</option>
-            {(catalog?.entries ?? []).map((e) => (
-              <option key={e.name} value={e.name}>
-                {e.name}
-              </option>
-            ))}
-          </select>
-          <input
-            placeholder="task 参数（可选）"
-            value={task}
-            onChange={(e) => setTask(e.target.value)}
-            style={{ minWidth: 240 }}
-          />
-          <button type="button" className="primary" disabled={busy || !entryName} onClick={() => void handleRun()}>
-            后台运行
-          </button>
-        </div>
-        {message && <p>{message}</p>}
-      </div>
-
-      <div className="card">
-        <div className="toolbar">
-          <h3 style={{ margin: 0 }}>最近运行</h3>
-          <Link to="/runs">查看全部</Link>
-        </div>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Entry</th>
-              <th>状态</th>
-              <th>阶段</th>
-            </tr>
-          </thead>
-          <tbody>
-            {runs.map((run) => (
-              <tr key={run.id}>
-                <td>
-                  <Link to={`/runs/${run.id}`}>{run.id}</Link>
-                </td>
-                <td>{run.entryName}</td>
-                <td>
-                  <span className={`badge ${run.status}`}>{run.status}</span>
-                </td>
-                <td>{run.currentStage ?? "-"}</td>
-              </tr>
-            ))}
-            {runs.length === 0 && (
+      <div className="dashboard-grid">
+        <section className="panel">
+          <div className="section-head">
+            <h2>最近运行</h2>
+            <Link to="/runs">查看全部</Link>
+          </div>
+          <table className="table">
+            <thead>
               <tr>
-                <td colSpan={4} style={{ color: "var(--text-muted)" }}>
-                  暂无运行记录
-                </td>
+                <th>ID</th>
+                <th>工作流</th>
+                <th>状态</th>
+                <th>阶段</th>
+                <th>耗时</th>
+                <th>更新时间</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {(summary?.recentRuns ?? []).map((run) => (
+                <tr key={run.id}>
+                  <td><Link to={`/runs/${run.id}`}>{run.id}</Link></td>
+                  <td>{run.entryName}</td>
+                  <td><StatusBadge status={run.status} /></td>
+                  <td>{run.currentStage ?? "-"}</td>
+                  <td>{formatDuration(run.startedAt, run.finishedAt)}</td>
+                  <td>{formatDate(run.updatedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {(summary?.recentRuns.length ?? 0) === 0 && <EmptyState title="暂无运行记录" description="从工作流页面启动一次运行后会显示在这里。" />}
+        </section>
 
-      <div className="toolbar">
-        <button type="button" onClick={() => void openApmHome()}>
-          打开配置目录
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            void importMinimalTemplate().then((msg) => {
-              setMessage(msg);
-            })
-          }
-        >
-          导入 minimal 模板
-        </button>
+        <aside className="side-stack">
+          <section className="panel">
+            <h2>系统健康检查</h2>
+            <div className="health-list">
+              {(summary?.health ?? []).map((item) => (
+                <div key={item.name}>
+                  <StatusBadge status={item.status} />
+                  <span>{item.name}</span>
+                  <strong>{item.detail}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="panel">
+            <h2>快速操作</h2>
+            <div className="action-list">
+              <button type="button" onClick={() => void openApmHome()}>打开配置目录</button>
+              <button
+                type="button"
+                onClick={() =>
+                  void importMinimalTemplate().then((msg) => {
+                    setMessage(msg);
+                    void load();
+                  })
+                }
+              >
+                导入 minimal 模板
+              </button>
+              <Link className="button" to="/studio">编辑配置</Link>
+            </div>
+            {message && <p className="muted">{message}</p>}
+            <p className="muted">APM_HOME: {summary?.daemon.apmHome ?? context?.apmHome ?? config?.apmHome ?? "-"}</p>
+          </section>
+        </aside>
       </div>
     </div>
   );

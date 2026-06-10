@@ -110,7 +110,7 @@ export function resolveHttpListen(apmHomeDir: string, config: ApmConfigFile): { 
   const enabled = http.enabled !== false;
   const host = typeof http.host === "string" && http.host.trim().length > 0 ? http.host.trim() : defaults.host;
   const port =
-    typeof http.port === "number" && Number.isFinite(http.port) && http.port > 0
+    typeof http.port === "number" && Number.isFinite(http.port) && http.port >= 0
       ? Math.floor(http.port)
       : defaults.port;
   return { host, port, enabled };
@@ -125,7 +125,7 @@ function normalizeHttpConfig(http: ApmHttpConfig | undefined): ApmHttpConfig | u
     enabled: http.enabled !== false,
     host: typeof http.host === "string" && http.host.trim().length > 0 ? http.host.trim() : defaults.host,
     port:
-      typeof http.port === "number" && Number.isFinite(http.port) && http.port > 0
+      typeof http.port === "number" && Number.isFinite(http.port) && http.port >= 0
         ? Math.floor(http.port)
         : defaults.port,
   };

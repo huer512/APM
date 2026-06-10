@@ -153,6 +153,39 @@ export class RunStore {
     return all.slice(-limit);
   }
 
+  public async listEvents(options: {
+    runId?: string;
+    level?: ApmEvent["level"];
+    kind?: ApmEvent["kind"];
+    query?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<{ events: ApmEvent[]; total: number }> {
+    await this.init();
+    const runs = options.runId ? [options.runId] : await this.listEventRunIds();
+    const events: ApmEvent[] = [];
+    for (const runId of runs) {
+      events.push(...(await this.readAllEvents(runId)));
+    }
+    const query = options.query?.trim().toLowerCase();
+    const filtered = events
+      .filter((event) => !options.level || event.level === options.level)
+      .filter((event) => !options.kind || event.kind === options.kind)
+      .filter((event) => {
+        if (!query) {
+          return true;
+        }
+        return JSON.stringify(event).toLowerCase().includes(query);
+      })
+      .sort((a, b) => b.ts.localeCompare(a.ts) || b.seq - a.seq);
+    const offset = Math.max(0, options.offset ?? 0);
+    const limit = Math.max(0, options.limit ?? 100);
+    return {
+      events: filtered.slice(offset, offset + limit),
+      total: filtered.length,
+    };
+  }
+
   public async getEventCount(runId: string): Promise<number> {
     const cached = this.seqCache.get(runId);
     if (cached !== undefined) {
@@ -194,6 +227,14 @@ export class RunStore {
 
   private eventPath(runId: string): string {
     return path.join(this.eventsDir, `${runId}.jsonl`);
+  }
+
+  private async listEventRunIds(): Promise<string[]> {
+    await ensureDir(this.eventsDir);
+    const entries = await fs.readdir(this.eventsDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+      .map((entry) => entry.name.slice(0, -".jsonl".length));
   }
 
   private async readAllEvents(runId: string): Promise<ApmEvent[]> {

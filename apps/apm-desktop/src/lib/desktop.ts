@@ -28,3 +28,19 @@ export async function openApmHome(): Promise<void> {
 export async function importMinimalTemplate(): Promise<string> {
   return invoke<string>("import_minimal_template");
 }
+
+export async function readApmTextFile(relativePath: string): Promise<string> {
+  return invoke<string>("read_apm_text_file", { relativePath });
+}
+
+export async function writeApmTextFile(relativePath: string, content: string): Promise<void> {
+  await invoke("write_apm_text_file", { relativePath, content });
+}
+
+export async function renameApmFile(relativePath: string, newRelativePath: string): Promise<void> {
+  await invoke("rename_apm_file", { relativePath, newRelativePath });
+}
+
+export async function deleteApmFile(relativePath: string): Promise<void> {
+  await invoke("delete_apm_file", { relativePath });
+}

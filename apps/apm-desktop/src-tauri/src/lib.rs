@@ -55,6 +55,17 @@ fn token_path(home: &Path) -> PathBuf {
     home.join("state").join("http.token")
 }
 
+fn desktop_daemon_pid_path(home: &Path) -> PathBuf {
+    home.join("state").join("desktop-daemon.pid")
+}
+
+fn repo_root_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..")
+}
+
 fn ensure_apm_dirs(home: &Path) -> Result<(), String> {
     for sub in ["prompts", "stages", "hosts", "entries", "state"] {
         fs::create_dir_all(home.join(sub)).map_err(|e| e.to_string())?;
@@ -167,16 +178,14 @@ fn check_http_health(base_url: &str) -> bool {
 fn get_desktop_context() -> DesktopContext {
     let home = apm_home_dir();
     let dev_mode = is_dev_mode();
-    let http_base_url = if dev_mode {
-        std::env::var("APM_HTTP_URL").ok()
-    } else {
-        http_base_from_config(&home)
-    };
-    let http_token = if dev_mode {
-        std::env::var("APM_HTTP_TOKEN").ok()
-    } else {
-        read_token(&home)
-    };
+    let http_base_url = std::env::var("APM_HTTP_URL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| http_base_from_config(&home));
+    let http_token = std::env::var("APM_HTTP_TOKEN")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| read_token(&home));
     DesktopContext {
         apm_home: home.to_string_lossy().to_string(),
         dev_mode,
@@ -209,26 +218,206 @@ fn daemon_status() -> DaemonStatus {
     }
 }
 
-#[tauri::command]
-fn daemon_start(state: State<DaemonState>) -> Result<DaemonStatus, String> {
-    if is_dev_mode() {
-        return Ok(daemon_status());
+fn current_target_triple() -> &'static str {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        "x86_64-unknown-linux-gnu"
+    }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        "aarch64-unknown-linux-gnu"
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        "x86_64-apple-darwin"
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        "aarch64-apple-darwin"
+    }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        "x86_64-pc-windows-msvc"
+    }
+    #[cfg(not(any(
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "windows", target_arch = "x86_64")
+    )))]
+    {
+        ""
+    }
+}
+
+fn sidecar_candidates(app: &AppHandle) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        dirs.push(resource_dir);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            dirs.push(parent.to_path_buf());
+            dirs.push(parent.join("resources"));
+        }
     }
 
+    let ext = std::env::consts::EXE_SUFFIX;
+    let triple = current_target_triple();
+    let names = if triple.is_empty() {
+        vec![format!("apm-daemon{}", ext)]
+    } else {
+        vec![
+            format!("apm-daemon-{}{}", triple, ext),
+            format!("apm-daemon{}", ext),
+        ]
+    };
+
+    let mut candidates = Vec::new();
+    for dir in dirs {
+        for name in &names {
+            candidates.push(dir.join("bin").join(name));
+            candidates.push(dir.join(name));
+        }
+    }
+    candidates
+}
+
+fn spawn_daemon_process(app: &AppHandle, home: &Path) -> Result<Child, String> {
+    if let Ok(path) = std::env::var("APM_DAEMON_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Command::new(trimmed)
+                .env("APM_HOME", home)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| format!("无法启动 APM_DAEMON_PATH 指定的 daemon: {}", e));
+        }
+    }
+
+    if is_dev_mode() || cfg!(debug_assertions) {
+        let repo_root = repo_root_dir();
+        let compiled_daemon = repo_root.join("dist").join("src").join("bin").join("apm-daemon.js");
+        if compiled_daemon.exists() {
+            return Command::new("node")
+                .arg(compiled_daemon)
+                .current_dir(&repo_root)
+                .env("APM_HOME", home)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| format!("无法在开发模式启动已编译 daemon: {}", e));
+        }
+        return Command::new("npm")
+            .arg("run")
+            .arg("dev:daemon")
+            .current_dir(&repo_root)
+            .env("APM_HOME", home)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("无法在开发模式启动 daemon: {}", e));
+    }
+
+    for candidate in sidecar_candidates(app) {
+        if candidate.exists() {
+            return Command::new(&candidate)
+                .env("APM_HOME", home)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| format!("无法启动 sidecar daemon {}: {}", candidate.display(), e));
+        }
+    }
+
+    Command::new("apm-daemon")
+        .env("APM_HOME", home)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| {
+            format!(
+                "无法启动 apm-daemon: {}。请确认已打包 sidecar，或设置 APM_DAEMON_PATH。",
+                e
+            )
+        })
+}
+
+fn write_desktop_daemon_pid(home: &Path, child: &Child) -> Result<(), String> {
+    fs::write(desktop_daemon_pid_path(home), format!("{}\n", child.id())).map_err(|e| e.to_string())
+}
+
+fn clear_desktop_daemon_pid(home: &Path) {
+    let _ = fs::remove_file(desktop_daemon_pid_path(home));
+}
+
+fn kill_pid(pid: u32) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let status = Command::new("taskkill")
+        .arg("/PID")
+        .arg(pid.to_string())
+        .arg("/T")
+        .arg("/F")
+        .status()
+        .map_err(|e| e.to_string())?;
+
+    #[cfg(not(target_os = "windows"))]
+    let status = Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status()
+        .map_err(|e| e.to_string())?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("无法停止 daemon 进程 {}", pid))
+    }
+}
+
+fn stop_managed_daemon(home: &Path, state: &State<DaemonState>) -> Result<DaemonStatus, String> {
+    let mut guard = state.child.lock().map_err(|e| e.to_string())?;
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+        clear_desktop_daemon_pid(home);
+        return Ok(daemon_status());
+    }
+    drop(guard);
+
+    if let Ok(raw) = fs::read_to_string(desktop_daemon_pid_path(home)) {
+        if let Ok(pid) = raw.trim().parse::<u32>() {
+            let _ = kill_pid(pid);
+        }
+        clear_desktop_daemon_pid(home);
+    }
+
+    Ok(daemon_status())
+}
+
+#[tauri::command]
+fn daemon_start(app: AppHandle, state: State<DaemonState>) -> Result<DaemonStatus, String> {
     let home = apm_home_dir();
     ensure_http_enabled(&home)?;
 
     let mut guard = state.child.lock().map_err(|e| e.to_string())?;
-    if guard.is_some() {
-        return Ok(daemon_status());
+    if let Some(child) = guard.as_mut() {
+        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
+            return Ok(daemon_status());
+        }
+        *guard = None;
     }
 
-    let sidecar = Command::new("apm-daemon")
-        .env("APM_HOME", &home)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("无法启动 apm-daemon: {}", e))?;
+    if let Some(base) = http_base_from_config(&home) {
+        if check_http_health(&base) {
+            return Ok(daemon_status());
+        }
+    }
+
+    let sidecar = spawn_daemon_process(&app, &home)?;
+    write_desktop_daemon_pid(&home, &sidecar)?;
     *guard = Some(sidecar);
 
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -245,30 +434,15 @@ fn daemon_start(state: State<DaemonState>) -> Result<DaemonStatus, String> {
 
 #[tauri::command]
 fn daemon_stop(state: State<DaemonState>) -> Result<DaemonStatus, String> {
-    if is_dev_mode() {
-        return Ok(daemon_status());
-    }
-    let mut guard = state.child.lock().map_err(|e| e.to_string())?;
-    if let Some(mut child) = guard.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-    Ok(daemon_status())
+    let home = apm_home_dir();
+    stop_managed_daemon(&home, &state)
 }
 
 #[tauri::command]
-fn daemon_restart(state: State<DaemonState>) -> Result<DaemonStatus, String> {
-    if is_dev_mode() {
-        return Ok(daemon_status());
-    }
-    {
-        let mut guard = state.child.lock().map_err(|e| e.to_string())?;
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-    daemon_start(state)
+fn daemon_restart(app: AppHandle, state: State<DaemonState>) -> Result<DaemonStatus, String> {
+    let home = apm_home_dir();
+    let _ = stop_managed_daemon(&home, &state);
+    daemon_start(app, state)
 }
 
 #[tauri::command]
@@ -316,6 +490,58 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn resolve_apm_relative_path(relative_path: &str) -> Result<PathBuf, String> {
+    let rel = Path::new(relative_path);
+    if rel.is_absolute() {
+        return Err("路径必须是 APM_HOME 内的相对路径".to_string());
+    }
+    for component in rel.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err("路径不能包含 ..".to_string());
+        }
+    }
+    let home = apm_home_dir();
+    Ok(home.join(rel))
+}
+
+#[tauri::command]
+fn read_apm_text_file(relative_path: String) -> Result<String, String> {
+    let path = resolve_apm_relative_path(&relative_path)?;
+    fs::read_to_string(&path).map_err(|e| format!("无法读取 {}: {}", relative_path, e))
+}
+
+#[tauri::command]
+fn write_apm_text_file(relative_path: String, content: String) -> Result<(), String> {
+    let path = resolve_apm_relative_path(&relative_path)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, content).map_err(|e| format!("无法写入 {}: {}", relative_path, e))
+}
+
+#[tauri::command]
+fn rename_apm_file(relative_path: String, new_relative_path: String) -> Result<(), String> {
+    let old_path = resolve_apm_relative_path(&relative_path)?;
+    let new_path = resolve_apm_relative_path(&new_relative_path)?;
+    if new_path.exists() {
+        return Err(format!("目标文件已存在: {}", new_relative_path));
+    }
+    if let Some(parent) = new_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&old_path, &new_path)
+        .map_err(|e| format!("无法重命名 {} 到 {}: {}", relative_path, new_relative_path, e))
+}
+
+#[tauri::command]
+fn delete_apm_file(relative_path: String) -> Result<(), String> {
+    let path = resolve_apm_relative_path(&relative_path)?;
+    if path.is_dir() {
+        return Err("不能删除目录".to_string());
+    }
+    fs::remove_file(&path).map_err(|e| format!("无法删除 {}: {}", relative_path, e))
+}
+
 #[tauri::command]
 fn import_minimal_template(app: AppHandle) -> Result<String, String> {
     let home = apm_home_dir();
@@ -325,9 +551,7 @@ fn import_minimal_template(app: AppHandle) -> Result<String, String> {
         .resource_dir()
         .map_err(|e| e.to_string())?;
     let examples = resource_dir.join("examples").join("minimal");
-    let dev_examples = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
+    let dev_examples = repo_root_dir()
         .join("examples")
         .join("minimal");
     let src = if examples.exists() {
@@ -359,12 +583,15 @@ pub fn run() {
             daemon_restart,
             open_apm_home,
             import_minimal_template,
+            read_apm_text_file,
+            write_apm_text_file,
+            rename_apm_file,
+            delete_apm_file,
         ])
         .setup(|app| {
-            if !is_dev_mode() {
-                let state = app.state::<DaemonState>();
-                let _ = daemon_start(state);
-            }
+            let handle = app.handle().clone();
+            let state = app.state::<DaemonState>();
+            let _ = daemon_start(handle, state);
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -1,23 +1,27 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import * as api from "../lib/api";
 import { useApp } from "../context/AppContext";
-import type { Catalog, RunRecord } from "../lib/types";
+import type { RunRecord } from "../lib/types";
+import { EmptyState, PageHeader, StatusBadge, formatDate, formatDuration } from "../components/UI";
+
+const STATUS_OPTIONS = [
+  ["", "全部"],
+  ["running", "运行中"],
+  ["paused", "等待人工"],
+  ["finished", "成功"],
+  ["failed", "失败"],
+  ["stopped", "已停止"],
+];
 
 export function Runs() {
   const { daemonStatus } = useApp();
   const [runs, setRuns] = useState<RunRecord[]>([]);
-  const [all, setAll] = useState(true);
-  const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [showNew, setShowNew] = useState(false);
-  const [entryName, setEntryName] = useState("");
-  const [paramsText, setParamsText] = useState("task=");
-  const [attachMode, setAttachMode] = useState(false);
+  const [status, setStatus] = useState("");
+  const [query, setQuery] = useState("");
 
   const load = async () => {
-    const [list, cat] = await Promise.all([api.fetchRuns(all), api.fetchCatalog()]);
-    setRuns(list);
-    setCatalog(cat);
+    setRuns(await api.fetchRuns(true));
   };
 
   useEffect(() => {
@@ -27,109 +31,79 @@ export function Runs() {
     void load();
     const timer = setInterval(() => void load(), 3000);
     return () => clearInterval(timer);
-  }, [daemonStatus?.httpReachable, all]);
+  }, [daemonStatus?.httpReachable]);
 
-  const parseParams = (): Record<string, unknown> => {
-    const out: Record<string, unknown> = {};
-    for (const line of paramsText.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.includes("=")) {
-        continue;
-      }
-      const [key, ...rest] = trimmed.split("=");
-      out[key.trim()] = rest.join("=").trim();
-    }
-    return out;
-  };
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return runs
+      .filter((run) => !status || run.status === status)
+      .filter((run) => {
+        if (!q) {
+          return true;
+        }
+        return [run.id, run.entryName, run.currentStage, run.currentPrompt, run.hostName]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(q));
+      });
+  }, [query, runs, status]);
 
-  const handleCreate = async () => {
-    const { runId } = await api.createRun({
-      entryName,
-      params: parseParams(),
-      detach: !attachMode,
-      attach: attachMode,
-    });
-    setShowNew(false);
-    await load();
-    if (attachMode) {
-      window.location.href = `/runs/${runId}?tab=attach`;
-    }
-  };
+  const counts = useMemo(() => {
+    return runs.reduce<Record<string, number>>((acc, run) => {
+      acc[run.status] = (acc[run.status] ?? 0) + 1;
+      return acc;
+    }, {});
+  }, [runs]);
 
   return (
     <div>
-      <h1 className="page-title">运行实例</h1>
-      <div className="toolbar">
-        <label>
-          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> 显示全部
-        </label>
-        <button type="button" className="primary" onClick={() => setShowNew(true)}>
-          新建运行
-        </button>
-        <button type="button" onClick={() => void load()}>
-          刷新
-        </button>
+      <PageHeader
+        title="运行实例"
+        description="查看和管理所有工作流运行实例。"
+        actions={
+          <>
+            <Link className="button primary" to="/workflows">新建运行</Link>
+            <button type="button" onClick={() => void load()}>刷新</button>
+          </>
+        }
+      />
+      <div className="filter-tabs">
+        {STATUS_OPTIONS.map(([value, label]) => (
+          <button key={value} type="button" className={status === value ? "active" : ""} onClick={() => setStatus(value)}>
+            {label} {value ? counts[value] ?? 0 : runs.length}
+          </button>
+        ))}
       </div>
-
-      {showNew && (
-        <div className="card">
-          <h3>新建运行</h3>
-          <div className="form-row">
-            <label>Entry</label>
-            <select value={entryName} onChange={(e) => setEntryName(e.target.value)}>
-              <option value="">选择</option>
-              {(catalog?.entries ?? []).map((e) => (
-                <option key={e.name} value={e.name}>
-                  {e.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-row">
-            <label>参数（每行 key=value）</label>
-            <textarea rows={4} value={paramsText} onChange={(e) => setParamsText(e.target.value)} />
-          </div>
-          <label>
-            <input type="checkbox" checked={attachMode} onChange={(e) => setAttachMode(e.target.checked)} />
-            启动后立即 Attach（HITL）
-          </label>
-          <div className="toolbar" style={{ marginTop: 12 }}>
-            <button type="button" className="primary" disabled={!entryName} onClick={() => void handleCreate()}>
-              启动
-            </button>
-            <button type="button" onClick={() => setShowNew(false)}>
-              取消
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="card">
+      <div className="toolbar surface-toolbar">
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索运行 ID、工作流、Agent、阶段..." />
+      </div>
+      <section className="panel">
         <table className="table">
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Entry</th>
               <th>状态</th>
-              <th>Host</th>
+              <th>运行 ID</th>
+              <th>工作流</th>
               <th>当前阶段</th>
+              <th>当前 Agent</th>
+              <th>主机</th>
+              <th>开始时间</th>
+              <th>耗时</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            {runs.map((run) => (
+            {filtered.map((run) => (
               <tr key={run.id}>
-                <td>
-                  <code>{run.id}</code>
-                </td>
+                <td><StatusBadge status={run.status} /></td>
+                <td>{run.id}</td>
                 <td>{run.entryName}</td>
-                <td>
-                  <span className={`badge ${run.status}`}>{run.status}</span>
-                </td>
-                <td>{run.hostName || "-"}</td>
                 <td>{run.currentStage ?? "-"}</td>
+                <td>{run.currentPrompt ?? "-"}</td>
+                <td>{run.hostName || "-"}</td>
+                <td>{formatDate(run.startedAt ?? run.createdAt)}</td>
+                <td>{formatDuration(run.startedAt, run.finishedAt)}</td>
                 <td>
-                  <Link to={`/runs/${run.id}`}>详情</Link>
+                  <Link to={`/runs/${run.id}`}>查看</Link>
                   {" · "}
                   <Link to={`/runs/${run.id}?tab=attach`}>Attach</Link>
                 </td>
@@ -137,7 +111,8 @@ export function Runs() {
             ))}
           </tbody>
         </table>
-      </div>
+        {filtered.length === 0 && <EmptyState title="没有匹配的运行实例" description="调整筛选条件，或从工作流页面启动一次运行。" />}
+      </section>
     </div>
   );
 }

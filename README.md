@@ -305,20 +305,20 @@ CLI + attach TUI 够用时可以跳过这节。APM Desktop 是基于 **Tauri 2 +
 
 ### 开发模式
 
-1. 在 `~/.apm/config.json` 启用 HTTP API（`"http": { "enabled": true, "port": 19740 }`），或之后通过桌面「设置」保存。
-2. **终端 1** 启动 daemon，记下日志里的 `apm http api http://127.0.0.1:19740` 和 token 文件路径：
-  ```bash
-   npm run dev:daemon
-   cat ~/.apm/state/http.token
-  ```
-3. **终端 2** 启动桌面前端（`APM_DESKTOP_DEV=1` 表示连接已有 daemon，不自动 spawn sidecar）：
-  ```bash
-   export APM_DESKTOP_DEV=1
-   export APM_HTTP_URL=http://127.0.0.1:19740
-   export APM_HTTP_TOKEN=$(cat ~/.apm/state/http.token)
-   npm run desktop:install
-   npm run desktop:dev
-  ```
+桌面应用会像 Docker Desktop 一样托管本机 daemon。开发模式下 Tauri 后端会自动执行根目录的 `npm run dev:daemon`，并使用 `~/.apm/config.json` 中的 HTTP API 配置。
+
+```bash
+npm run desktop:install
+APM_DESKTOP_DEV=1 npm run desktop:dev
+```
+
+如需连接外部 daemon，可显式指定 HTTP 地址和 token；如需指定 daemon 可执行文件，可设置 `APM_DAEMON_PATH`。
+
+```bash
+export APM_HTTP_URL=http://127.0.0.1:19740
+export APM_HTTP_TOKEN=$(cat ~/.apm/state/http.token)
+APM_DESKTOP_DEV=1 npm run desktop:dev
+```
 
 ### 构建安装包
 
@@ -386,4 +386,3 @@ export CURSOR_API_KEY="cursor_..."
 
 - [APM_REQUIREMENTS.md](APM_REQUIREMENTS.md) — 完整目录规范、变量引用语法、HITL 语义
 - [examples/minimal/](examples/minimal/) — 最小可运行工作流，Quick Start 可直接复制
-
