@@ -283,7 +283,7 @@ export function Studio() {
     event.currentTarget.setPointerCapture(pointerId);
     const onMove = (moveEvent: PointerEvent) => {
       const rect = layout.getBoundingClientRect();
-      const leftPaneWidth = treeCollapsed ? 58 : 270;
+      const leftPaneWidth = treeCollapsed ? 12 : 270;
       const available = rect.width - leftPaneWidth - 10;
       const editorWidth = moveEvent.clientX - rect.left - leftPaneWidth;
       const next = Math.round((editorWidth / available) * 100);
@@ -322,7 +322,7 @@ export function Studio() {
         className={`studio-layout ${treeCollapsed ? "tree-collapsed" : ""}`}
         style={{
           gridTemplateColumns: treeCollapsed
-            ? `48px 10px minmax(360px, ${editorPercent}fr) 10px minmax(320px, ${100 - editorPercent}fr)`
+            ? `0 12px minmax(360px, ${editorPercent}fr) 10px minmax(320px, ${100 - editorPercent}fr)`
             : `260px 10px minmax(420px, ${editorPercent}fr) 10px minmax(320px, ${100 - editorPercent}fr)`,
         }}
       >
