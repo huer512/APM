@@ -367,11 +367,16 @@ export function Studio() {
 
       <div
         ref={layoutRef}
-        className={`studio-layout ${treeCollapsed ? "tree-collapsed" : ""}`}
+        className={`studio-layout ${treeCollapsed ? "tree-collapsed" : ""} ${editorMode === "source" ? "source-mode" : "visual-mode"}`}
         style={{
-          gridTemplateColumns: treeCollapsed
-            ? `0 12px minmax(360px, ${editorPercent}fr) 10px minmax(320px, ${100 - editorPercent}fr)`
-            : `260px 10px minmax(420px, ${editorPercent}fr) 10px minmax(320px, ${100 - editorPercent}fr)`,
+          gridTemplateColumns:
+            editorMode === "source"
+              ? treeCollapsed
+                ? `0 12px minmax(360px, ${editorPercent}fr) 10px minmax(320px, ${100 - editorPercent}fr)`
+                : `260px 10px minmax(420px, ${editorPercent}fr) 10px minmax(320px, ${100 - editorPercent}fr)`
+              : treeCollapsed
+                ? "0 12px minmax(0, 1fr)"
+                : "260px 10px minmax(0, 1fr)",
         }}
       >
         <aside className="studio-tree">
@@ -511,33 +516,37 @@ export function Studio() {
           )}
         </section>
 
-        <div
-          className="studio-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          title="拖动调整编辑器和预览宽度"
-          onPointerDown={beginResize}
-        />
+        {editorMode === "source" && (
+          <>
+            <div
+              className="studio-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              title="拖动调整编辑器和预览宽度"
+              onPointerDown={beginResize}
+            />
 
-        <aside className="studio-preview-panel">
-          <div className="studio-preview-tabs">
-            <button type="button" className={previewMode === "preview" ? "active" : ""} onClick={() => setPreviewMode("preview")}>
-              可视化预览
-            </button>
-            <button type="button" className={previewMode === "source" ? "active" : ""} onClick={() => setPreviewMode("source")}>
-              源代码
-            </button>
-          </div>
-          {selected ? (
-            previewMode === "preview" ? (
-              <MarkdownPreview content={content} />
-            ) : (
-              <pre className="json-box studio-source-preview">{content}</pre>
-            )
-          ) : (
-            <div className="studio-preview-empty">选择文件后显示实时预览。</div>
-          )}
-        </aside>
+            <aside className="studio-preview-panel">
+              <div className="studio-preview-tabs">
+                <button type="button" className={previewMode === "preview" ? "active" : ""} onClick={() => setPreviewMode("preview")}>
+                  预览
+                </button>
+                <button type="button" className={previewMode === "source" ? "active" : ""} onClick={() => setPreviewMode("source")}>
+                  源代码
+                </button>
+              </div>
+              {selected ? (
+                previewMode === "preview" ? (
+                  <MarkdownPreview content={content} />
+                ) : (
+                  <pre className="json-box studio-source-preview">{content}</pre>
+                )
+              ) : (
+                <div className="studio-preview-empty">选择文件后显示实时预览。</div>
+              )}
+            </aside>
+          </>
+        )}
       </div>
       <StudioModal
         dialog={dialog}

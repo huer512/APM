@@ -528,6 +528,11 @@ textarea:focus {
 .studio-layout.tree-collapsed {
   grid-template-columns: 0 12px minmax(420px, 1.2fr) 10px minmax(320px, 0.8fr);
 }
+.studio-layout.visual-mode {
+  background:
+    radial-gradient(circle at 28% 0, rgba(47, 129, 255, 0.08), transparent 34%),
+    rgba(8, 18, 27, 0.72);
+}
 .studio-tree,
 .studio-editor-panel,
 .studio-preview-panel {
