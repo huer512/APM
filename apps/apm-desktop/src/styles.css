@@ -882,6 +882,120 @@ textarea:focus {
   flex-direction: column;
   gap: 8px;
 }
+.prompt-params {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.param-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(7, 16, 24, 0.56);
+}
+.param-toggle-row div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.param-toggle-row strong {
+  color: var(--text);
+}
+.param-toggle-row span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.custom-select {
+  position: relative;
+  min-width: 0;
+}
+.custom-select-trigger {
+  width: 100%;
+  min-height: 38px;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  background: #071018;
+}
+.custom-select-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.custom-select-trigger b {
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(45deg) translateY(-2px);
+}
+.custom-select-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(360px, calc(100vw - 48px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 20% 0, rgba(47, 129, 255, 0.15), transparent 42%),
+    #0a1722;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+  overflow: hidden;
+}
+.custom-select-options {
+  display: flex;
+  flex-direction: column;
+  max-height: 190px;
+  overflow: auto;
+  padding: 6px;
+}
+.custom-select-options button {
+  width: 100%;
+  min-height: 44px;
+  justify-content: flex-start;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+.custom-select-options button.active,
+.custom-select-options button:hover {
+  background: rgba(47, 129, 255, 0.16);
+}
+.custom-select-options small {
+  color: var(--text-muted);
+}
+.custom-select-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--border-soft);
+  background: rgba(7, 16, 24, 0.82);
+}
+.custom-select-custom > span {
+  color: #9fc8ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+.custom-select-custom div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.custom-select-custom input,
+.custom-select-custom button {
+  min-height: 36px;
+  min-width: 0;
+}
 .visual-list-row,
 .visual-pair-row {
   display: grid;

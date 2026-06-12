@@ -384,9 +384,7 @@ export function Studio() {
             <>
               <div className="studio-space">
                 <label>选择配置空间</label>
-                <select value="demo" onChange={() => undefined}>
-                  <option value="demo">demo</option>
-                </select>
+                <CustomSelectBox value="demo" options={[{ value: "demo", label: "demo" }]} onChange={() => undefined} />
                 <button type="button" className="primary subtle" onClick={() => setDialog({ type: "create", value: "" })}>
                   + 新建配置
                 </button>
@@ -684,15 +682,6 @@ function StageVisualEditor({
           </ConfigField>
         </div>
       </div>
-      <div className="visual-section grow">
-        <h3>阶段备注</h3>
-        <textarea
-          className="visual-textarea"
-          value={doc.notes}
-          placeholder="补充阶段目标、输入输出约定或执行注意事项。"
-          onChange={(event) => onChange({ ...doc, notes: event.target.value })}
-        />
-      </div>
     </>
   );
 }
@@ -701,16 +690,28 @@ function PromptVisualEditor({ doc, onChange }: { doc: PromptDoc; onChange: (data
   return (
     <>
       <div className="visual-section">
-        <h3>模型配置</h3>
+        <h3>提示词参数</h3>
         <div className="visual-grid two">
-          <ConfigField label="模型" hint="使用 auto 时由 Daemon 选择默认模型">
-            <input value={doc.model} placeholder="auto" onChange={(event) => onChange({ ...doc, model: event.target.value })} />
-          </ConfigField>
-          <ConfigField label="元数据" hint="额外 frontmatter 字段">
+          <div className="prompt-params">
+            <ConfigField label="模型" hint="使用 auto 时由 Daemon 选择默认模型">
+              <input value={doc.model} placeholder="auto" onChange={(event) => onChange({ ...doc, model: event.target.value })} />
+            </ConfigField>
+            <div className="param-toggle-row">
+              <div>
+                <strong>项目 Skills</strong>
+                <span>开启后 Cursor SDK 会加载项目级设置和 Skills。</span>
+              </div>
+              <label className="switch">
+                <input type="checkbox" checked={doc.skills} onChange={(event) => onChange({ ...doc, skills: event.target.checked })} />
+                <span />
+              </label>
+            </div>
+          </div>
+          <ConfigField label="自定义字段" hint="这些 frontmatter 字段会作为变量注入 Prompt，可在正文中用 {字段名} 引用。">
             <PairList
               items={doc.metadata}
-              keyPlaceholder="字段名"
-              valuePlaceholder="字段值"
+              keyPlaceholder="字段名，例如 topic"
+              valuePlaceholder="字段值，可使用 {task}"
               onChange={(metadata) => onChange({ ...doc, metadata })}
             />
           </ConfigField>
@@ -803,16 +804,15 @@ function ComboInput({
   placeholder: string;
   onChange: (value: string) => void;
 }) {
-  const listId = `options-${placeholder.replace(/\W/g, "-")}`;
   return (
-    <>
-      <input value={value} list={listId} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
-      <datalist id={listId}>
-        {options.map((option) => (
-          <option value={option} key={option} />
-        ))}
-      </datalist>
-    </>
+    <CustomSelectBox
+      value={value}
+      options={options.map((option) => ({ value: option, label: option }))}
+      placeholder={placeholder}
+      allowCustom
+      customLabel="自定义"
+      onChange={onChange}
+    />
   );
 }
 
@@ -884,6 +884,105 @@ function PairList({
       <button type="button" className="subtle-action" onClick={() => onChange([...rows, { key: "", value: "" }])}>
         + 添加字段
       </button>
+    </div>
+  );
+}
+
+function CustomSelectBox({
+  value,
+  options,
+  placeholder = "请选择",
+  allowCustom = false,
+  customLabel = "自定义",
+  customPlaceholder = "输入自定义值",
+  customValueLabel,
+  onChange,
+}: {
+  value: string;
+  options: Array<{ value: string; label: string; description?: string }>;
+  placeholder?: string;
+  allowCustom?: boolean;
+  customLabel?: string;
+  customPlaceholder?: string;
+  customValueLabel?: (value: string) => string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [customValue, setCustomValue] = useState("");
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((option) => option.value === value);
+  const label = selected?.label ?? (value ? (customValueLabel ? customValueLabel(value) : value) : placeholder);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const close = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const submitCustom = () => {
+    const next = customValue.trim();
+    if (!next) {
+      return;
+    }
+    onChange(next);
+    setCustomValue("");
+    setOpen(false);
+  };
+
+  return (
+    <div className="custom-select" ref={rootRef}>
+      <button type="button" className="custom-select-trigger" onClick={() => setOpen((next) => !next)}>
+        <span>{label}</span>
+        <b aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="custom-select-menu">
+          <div className="custom-select-options">
+            {options.map((option) => (
+              <button
+                type="button"
+                key={option.value}
+                className={option.value === value ? "active" : ""}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                <strong>{option.label}</strong>
+                {option.description && <small>{option.description}</small>}
+              </button>
+            ))}
+          </div>
+          {allowCustom && (
+            <div className="custom-select-custom">
+              <span>+ {customLabel}</span>
+              <div>
+                <input
+                  value={customValue}
+                  placeholder={customPlaceholder}
+                  onChange={(event) => setCustomValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      submitCustom();
+                    }
+                  }}
+                />
+                <button type="button" disabled={!customValue.trim()} onClick={submitCustom}>
+                  添加
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

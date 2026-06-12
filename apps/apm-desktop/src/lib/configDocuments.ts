@@ -12,11 +12,11 @@ export interface EntryDoc {
 export interface StageDoc {
   prompts: string[];
   nextStages: string[];
-  notes: string;
 }
 
 export interface PromptDoc {
   model: string;
+  skills: boolean;
   metadata: Array<{ key: string; value: string }>;
   body: string;
 }
@@ -82,7 +82,6 @@ export function parseConfigDocument(kind: ConfigKind, item: CatalogItem, raw: st
       data: {
         prompts,
         nextStages,
-        notes: stripKnownStageSections(parts.body).trim(),
       },
     };
   }
@@ -110,7 +109,7 @@ export function parseConfigDocument(kind: ConfigKind, item: CatalogItem, raw: st
   }
 
   const metadata = Object.entries(parts.frontmatter)
-    .filter(([key]) => key !== "model")
+    .filter(([key]) => key !== "model" && key !== "skills")
     .map(([key, value]) => ({ key, value }));
   return {
     kind,
@@ -119,6 +118,7 @@ export function parseConfigDocument(kind: ConfigKind, item: CatalogItem, raw: st
     errors: parts.errors,
     data: {
       model: parts.frontmatter.model ?? "auto",
+      skills: isTruthy(parts.frontmatter.skills),
       metadata,
       body: parts.body,
     },
@@ -141,7 +141,6 @@ export function serializeConfigDocument(doc: ConfigDocument): string {
   if (doc.kind === "stages") {
     const data = doc.data as StageDoc;
     const body = [
-      data.notes.trim(),
       "## 提示词",
       ...data.prompts.filter(Boolean).map((item) => `- ${item}`),
       "",
@@ -174,6 +173,7 @@ export function serializeConfigDocument(doc: ConfigDocument): string {
   return withFrontmatter(
     {
       model: data.model || "auto",
+      skills: data.skills ? "true" : "",
       ...pairsToObject(data.metadata),
     },
     data.body,
@@ -243,14 +243,13 @@ function parseSectionList(body: string, title: string): string[] {
     .filter(Boolean);
 }
 
-function stripKnownStageSections(body: string): string {
-  return body
-    .replace(/##\s*提示词\s*\n[\s\S]*?(?=\n##\s|$)/i, "")
-    .replace(/##\s*后继阶段\s*\n[\s\S]*?(?=\n##\s|$)/i, "");
-}
-
 function required(value: string | undefined, field: string): string[] {
   return value?.trim() ? [] : [`缺少必填字段: ${field}`];
+}
+
+function isTruthy(value: string | undefined): boolean {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "true" || normalized === "on" || normalized === "yes" || normalized === "1";
 }
 
 function unquote(value: string): string {
