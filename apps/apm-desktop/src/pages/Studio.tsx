@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { EditorState } from "@codemirror/state";
 import { EditorView, lineNumbers } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
@@ -7,6 +7,16 @@ import * as api from "../lib/api";
 import * as desktop from "../lib/desktop";
 import { useApp } from "../context/AppContext";
 import type { Catalog, CatalogItem } from "../lib/types";
+import {
+  parseConfigDocument,
+  serializeConfigDocument,
+  type ConfigData,
+  type ConfigDocument,
+  type EntryDoc,
+  type HostDoc,
+  type PromptDoc,
+  type StageDoc,
+} from "../lib/configDocuments";
 import { PageHeader } from "../components/UI";
 
 type Category = "prompts" | "stages" | "hosts" | "entries";
@@ -87,11 +97,13 @@ export function Studio() {
   const [category, setCategory] = useState<Category>("entries");
   const [selected, setSelected] = useState<CatalogItem | null>(null);
   const [content, setContent] = useState("");
+  const [document, setDocument] = useState<ConfigDocument | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingFile, setLoadingFile] = useState(false);
   const [editorHost, setEditorHost] = useState<HTMLDivElement | null>(null);
+  const [editorMode, setEditorMode] = useState<"visual" | "source">("visual");
   const [previewMode, setPreviewMode] = useState<"preview" | "source">("preview");
   const [dialog, setDialog] = useState<StudioDialog>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
@@ -144,6 +156,22 @@ export function Studio() {
     return cat;
   };
 
+  const replaceEditorText = (text: string) => {
+    const view = viewRef.current;
+    if (!view) {
+      return;
+    }
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: text },
+    });
+  };
+
+  const setStructuredDocument = (doc: ConfigDocument) => {
+    setDocument(doc);
+    setContent(doc.raw);
+    replaceEditorText(doc.raw);
+  };
+
   const loadFile = async (item: CatalogItem) => {
     setSelected(item);
     setValidationError(null);
@@ -152,17 +180,13 @@ export function Studio() {
     setLoadingFile(true);
     try {
       const text = await desktop.readApmTextFile(item.path);
-      setContent(text);
-      viewRef.current?.dispatch({
-        changes: { from: 0, to: viewRef.current.state.doc.length, insert: text },
-      });
+      setStructuredDocument(parseConfigDocument(category, item, text));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setContent("");
+      setDocument(null);
       setLoadError(message);
-      viewRef.current?.dispatch({
-        changes: { from: 0, to: viewRef.current.state.doc.length, insert: "" },
-      });
+      replaceEditorText("");
     } finally {
       setLoadingFile(false);
     }
@@ -172,13 +196,15 @@ export function Studio() {
     if (!selected) {
       return;
     }
-    const err = validateFrontmatter(content);
+    const raw = editorMode === "source" ? content : document ? serializeConfigDocument(document) : content;
+    const err = validateFrontmatter(raw);
     setValidationError(err);
     if (err) {
       return;
     }
     try {
-      await desktop.writeApmTextFile(selected.path, content);
+      await desktop.writeApmTextFile(selected.path, raw);
+      setStructuredDocument(parseConfigDocument(category, selected, raw));
       setStatus(`已保存 ${selected.path}（对进行中的 run 不生效，请新开 run）`);
       setLoadError(null);
     } catch (err) {
@@ -245,10 +271,32 @@ export function Studio() {
     await desktop.deleteApmFile(item.path);
     setSelected(null);
     setContent("");
-    viewRef.current?.dispatch({
-      changes: { from: 0, to: viewRef.current.state.doc.length, insert: "" },
-    });
+    setDocument(null);
+    replaceEditorText("");
     await refreshCatalog();
+  };
+
+  const updateVisualDocument = (data: ConfigData) => {
+    if (!document) {
+      return;
+    }
+    const raw = serializeConfigDocument({ ...document, data });
+    const parsed = parseConfigDocument(document.kind, document.item, raw);
+    const next = { ...parsed, data, raw };
+    setDocument(next);
+    setContent(next.raw);
+    replaceEditorText(next.raw);
+  };
+
+  const toggleEditorMode = () => {
+    if (editorMode === "source") {
+      if (selected) {
+        setDocument(parseConfigDocument(category, selected, content));
+      }
+      setEditorMode("visual");
+      return;
+    }
+    setEditorMode("source");
   };
 
   const submitDialog = async () => {
@@ -310,8 +358,8 @@ export function Studio() {
             <button type="button" className="primary" disabled={!selected || loadingFile} onClick={() => void saveAndApply()}>
               保存并应用
             </button>
-            <button type="button" disabled={!selected} onClick={() => setPreviewMode((mode) => (mode === "preview" ? "source" : "preview"))}>
-              {previewMode === "preview" ? "源代码" : "预览"}
+            <button type="button" disabled={!selected} onClick={toggleEditorMode}>
+              {editorMode === "visual" ? "编辑源代码" : "返回可视化"}
             </button>
           </>
         }
@@ -348,6 +396,9 @@ export function Studio() {
                     onClick={() => {
                       setCategory(c.id);
                       setSelected(null);
+                      setDocument(null);
+                      setContent("");
+                      replaceEditorText("");
                     }}
                   >
                     {c.label}
@@ -405,21 +456,24 @@ export function Studio() {
                 <button type="button" className="active">
                   {displayFileName(selected)}
                 </button>
+                <span className="mode-pill">{editorMode === "visual" ? "可视化编辑" : "源码编辑"}</span>
                 <button type="button" onClick={() => setDialog({ type: "create", value: "" })}>
                   +
                 </button>
               </div>
-              <div className="markdown-toolbar">
-                <button type="button" onClick={() => insertText("# ")}>H</button>
-                <button type="button" onClick={() => insertText("**", "**")}>B</button>
-                <button type="button" onClick={() => insertText("_", "_")}>I</button>
-                <button type="button" onClick={() => insertText("`", "`")}>{"</>"}</button>
-                <button type="button" onClick={() => insertText("[", "](url)")}>Link</button>
-                <button type="button" onClick={() => insertText("![alt](", ")")}>Img</button>
-                <button type="button" onClick={() => insertText("- ")}>List</button>
-                <button type="button" onClick={() => insertText("> ")}>Quote</button>
-                <button type="button" onClick={() => insertText("\n```yaml\n", "\n```\n")}>YAML</button>
-              </div>
+              {editorMode === "source" && (
+                <div className="markdown-toolbar">
+                  <button type="button" onClick={() => insertText("# ")}>H</button>
+                  <button type="button" onClick={() => insertText("**", "**")}>B</button>
+                  <button type="button" onClick={() => insertText("_", "_")}>I</button>
+                  <button type="button" onClick={() => insertText("`", "`")}>{"</>"}</button>
+                  <button type="button" onClick={() => insertText("[", "](url)")}>Link</button>
+                  <button type="button" onClick={() => insertText("![alt](", ")")}>Img</button>
+                  <button type="button" onClick={() => insertText("- ")}>List</button>
+                  <button type="button" onClick={() => insertText("> ")}>Quote</button>
+                  <button type="button" onClick={() => insertText("\n```yaml\n", "\n```\n")}>YAML</button>
+                </div>
+              )}
               {(loadingFile || loadError || validationError || status) && (
                 <div className="studio-message-row">
                   {loadingFile && <span className="muted">正在加载 {selected.path}...</span>}
@@ -428,13 +482,26 @@ export function Studio() {
                   {status && <span className="success-text">{status}</span>}
                 </div>
               )}
-              <div className="editor-wrap" ref={setEditorHost} />
-              <div className="editor-statusbar">
-                <span>行 {lineCount}</span>
-                <span>{charCount} 字符</span>
-                <span>{selected.path}</span>
-                <strong>Markdown</strong>
-              </div>
+              {editorMode === "visual" ? (
+                <>
+                  <VisualConfigEditor doc={document} catalog={catalog} onChange={updateVisualDocument} />
+                  <div className="editor-statusbar">
+                    <span>{document?.errors.length ? `${document.errors.length} 个配置问题` : "结构化配置"}</span>
+                    <span>{selected.path}</span>
+                    <strong>{category}</strong>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="editor-wrap" ref={setEditorHost} />
+                  <div className="editor-statusbar">
+                    <span>行 {lineCount}</span>
+                    <span>{charCount} 字符</span>
+                    <span>{selected.path}</span>
+                    <strong>Markdown</strong>
+                  </div>
+                </>
+              )}
             </>
           ) : (
             <div className="studio-empty-editor">
@@ -491,6 +558,325 @@ export function Studio() {
 
 function sanitizeFileStem(input: string): string {
   return input.trim().replace(/\.md$/i, "").replace(/[\\/]/g, "");
+}
+
+function VisualConfigEditor({
+  doc,
+  catalog,
+  onChange,
+}: {
+  doc: ConfigDocument | null;
+  catalog: Catalog | null;
+  onChange: (data: ConfigData) => void;
+}) {
+  if (!doc) {
+    return (
+      <div className="visual-editor empty">
+        <h2>无法解析配置</h2>
+        <p>切换到源码编辑检查文件内容。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="visual-editor">
+      {doc.errors.length > 0 && (
+        <div className="visual-errors">
+          <strong>配置需要处理</strong>
+          {doc.errors.map((error) => (
+            <span key={error}>{error}</span>
+          ))}
+        </div>
+      )}
+      {doc.kind === "entries" && (
+        <EntryVisualEditor doc={doc.data as EntryDoc} catalog={catalog} onChange={(data) => onChange(data)} />
+      )}
+      {doc.kind === "stages" && (
+        <StageVisualEditor doc={doc.data as StageDoc} catalog={catalog} onChange={(data) => onChange(data)} />
+      )}
+      {doc.kind === "prompts" && <PromptVisualEditor doc={doc.data as PromptDoc} onChange={(data) => onChange(data)} />}
+      {doc.kind === "hosts" && <HostVisualEditor doc={doc.data as HostDoc} onChange={(data) => onChange(data)} />}
+    </div>
+  );
+}
+
+function EntryVisualEditor({
+  doc,
+  catalog,
+  onChange,
+}: {
+  doc: EntryDoc;
+  catalog: Catalog | null;
+  onChange: (data: EntryDoc) => void;
+}) {
+  const stageNames = catalog?.stages.map((item) => item.name) ?? [];
+  const hostNames = catalog?.hosts.map((item) => item.name) ?? [];
+  return (
+    <>
+      <div className="visual-section">
+        <h3>入口</h3>
+        <div className="visual-grid two">
+          <ConfigField label="入口阶段" hint="工作流启动时进入的第一个阶段">
+            <ComboInput value={doc.entry} options={stageNames} placeholder="stage_a" onChange={(entry) => onChange({ ...doc, entry })} />
+          </ConfigField>
+          <ConfigField label="默认主机" hint="运行该入口时优先使用的执行环境">
+            <ComboInput value={doc.host} options={hostNames} placeholder="local" onChange={(host) => onChange({ ...doc, host })} />
+          </ConfigField>
+        </div>
+      </div>
+      <div className="visual-section">
+        <h3>变量</h3>
+        <PairList
+          items={doc.variables}
+          keyPlaceholder="变量名，例如 task"
+          valuePlaceholder="默认值"
+          onChange={(variables) => onChange({ ...doc, variables })}
+        />
+      </div>
+      <div className="visual-section grow">
+        <h3>说明文档</h3>
+        <textarea
+          className="visual-textarea"
+          value={doc.description}
+          placeholder="入口配置说明，支持 Markdown。"
+          onChange={(event) => onChange({ ...doc, description: event.target.value })}
+        />
+      </div>
+    </>
+  );
+}
+
+function StageVisualEditor({
+  doc,
+  catalog,
+  onChange,
+}: {
+  doc: StageDoc;
+  catalog: Catalog | null;
+  onChange: (data: StageDoc) => void;
+}) {
+  const promptNames = catalog?.prompts.map((item) => item.name) ?? [];
+  const stageNames = catalog?.stages.map((item) => item.name) ?? [];
+  return (
+    <>
+      <div className="visual-section">
+        <h3>阶段执行</h3>
+        <div className="visual-grid two">
+          <ConfigField label="Prompt 队列" hint="阶段会按顺序调用这些 Prompt">
+            <StringList items={doc.prompts} options={promptNames} placeholder="prompt_a" onChange={(prompts) => onChange({ ...doc, prompts })} />
+          </ConfigField>
+          <ConfigField label="后继阶段" hint="本阶段完成后可进入的下一组阶段">
+            <StringList
+              items={doc.nextStages}
+              options={stageNames}
+              placeholder="next_stage"
+              onChange={(nextStages) => onChange({ ...doc, nextStages })}
+            />
+          </ConfigField>
+        </div>
+      </div>
+      <div className="visual-section grow">
+        <h3>阶段备注</h3>
+        <textarea
+          className="visual-textarea"
+          value={doc.notes}
+          placeholder="补充阶段目标、输入输出约定或执行注意事项。"
+          onChange={(event) => onChange({ ...doc, notes: event.target.value })}
+        />
+      </div>
+    </>
+  );
+}
+
+function PromptVisualEditor({ doc, onChange }: { doc: PromptDoc; onChange: (data: PromptDoc) => void }) {
+  return (
+    <>
+      <div className="visual-section">
+        <h3>模型配置</h3>
+        <div className="visual-grid two">
+          <ConfigField label="模型" hint="使用 auto 时由 Daemon 选择默认模型">
+            <input value={doc.model} placeholder="auto" onChange={(event) => onChange({ ...doc, model: event.target.value })} />
+          </ConfigField>
+          <ConfigField label="元数据" hint="额外 frontmatter 字段">
+            <PairList
+              items={doc.metadata}
+              keyPlaceholder="字段名"
+              valuePlaceholder="字段值"
+              onChange={(metadata) => onChange({ ...doc, metadata })}
+            />
+          </ConfigField>
+        </div>
+      </div>
+      <div className="visual-section grow">
+        <h3>Prompt 内容</h3>
+        <textarea
+          className="visual-textarea code"
+          value={doc.body}
+          placeholder="在这里编写 Prompt 正文，可使用 {task} 等变量。"
+          onChange={(event) => onChange({ ...doc, body: event.target.value })}
+        />
+      </div>
+    </>
+  );
+}
+
+function HostVisualEditor({ doc, onChange }: { doc: HostDoc; onChange: (data: HostDoc) => void }) {
+  return (
+    <>
+      <div className="visual-section">
+        <h3>连接信息</h3>
+        <div className="visual-grid three">
+          <ConfigField label="主机" hint="本机可使用 localhost">
+            <input value={doc.host} placeholder="localhost" onChange={(event) => onChange({ ...doc, host: event.target.value })} />
+          </ConfigField>
+          <ConfigField label="端口" hint="SSH 或自定义连接端口">
+            <input value={doc.port} placeholder="22" onChange={(event) => onChange({ ...doc, port: event.target.value })} />
+          </ConfigField>
+          <ConfigField label="用户名" hint="远程主机登录用户">
+            <input value={doc.username} placeholder="root" onChange={(event) => onChange({ ...doc, username: event.target.value })} />
+          </ConfigField>
+        </div>
+      </div>
+      <div className="visual-section">
+        <h3>运行环境</h3>
+        <div className="visual-grid two">
+          <ConfigField label="工作目录" hint="Agent 执行任务时使用的 workspace">
+            <input value={doc.workspace} placeholder="." onChange={(event) => onChange({ ...doc, workspace: event.target.value })} />
+          </ConfigField>
+          <ConfigField label="虚拟环境" hint="可选，例如 .venv/bin/activate">
+            <input value={doc.virtualEnv} placeholder=".venv" onChange={(event) => onChange({ ...doc, virtualEnv: event.target.value })} />
+          </ConfigField>
+        </div>
+      </div>
+      <div className="visual-section grow">
+        <h3>凭据</h3>
+        <div className="visual-grid two stretch">
+          <ConfigField label="密码" hint="可留空，保存时仍写入 Markdown frontmatter">
+            <textarea
+              className="visual-textarea compact"
+              value={doc.password}
+              placeholder="password"
+              onChange={(event) => onChange({ ...doc, password: event.target.value })}
+            />
+          </ConfigField>
+          <ConfigField label="私钥" hint="支持粘贴 PEM 私钥内容或路径">
+            <textarea
+              className="visual-textarea compact code"
+              value={doc.privateKey}
+              placeholder="~/.ssh/id_rsa"
+              onChange={(event) => onChange({ ...doc, privateKey: event.target.value })}
+            />
+          </ConfigField>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ConfigField({ label, hint, children }: { label: string; hint: string; children: ReactNode }) {
+  return (
+    <label className="visual-field">
+      <span>{label}</span>
+      {children}
+      <small>{hint}</small>
+    </label>
+  );
+}
+
+function ComboInput({
+  value,
+  options,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const listId = `options-${placeholder.replace(/\W/g, "-")}`;
+  return (
+    <>
+      <input value={value} list={listId} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+      <datalist id={listId}>
+        {options.map((option) => (
+          <option value={option} key={option} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
+function StringList({
+  items,
+  options,
+  placeholder,
+  onChange,
+}: {
+  items: string[];
+  options: string[];
+  placeholder: string;
+  onChange: (items: string[]) => void;
+}) {
+  const nextItems = items.length > 0 ? items : [""];
+  return (
+    <div className="visual-list">
+      {nextItems.map((item, index) => (
+        <div className="visual-list-row" key={index}>
+          <ComboInput
+            value={item}
+            options={options}
+            placeholder={placeholder}
+            onChange={(value) => onChange(nextItems.map((current, i) => (i === index ? value : current)))}
+          />
+          <button type="button" disabled={nextItems.length === 1} onClick={() => onChange(nextItems.filter((_, i) => i !== index))}>
+            删除
+          </button>
+        </div>
+      ))}
+      <button type="button" className="subtle-action" onClick={() => onChange([...nextItems, ""])}>
+        + 添加
+      </button>
+    </div>
+  );
+}
+
+function PairList({
+  items,
+  keyPlaceholder,
+  valuePlaceholder,
+  onChange,
+}: {
+  items: Array<{ key: string; value: string }>;
+  keyPlaceholder: string;
+  valuePlaceholder: string;
+  onChange: (items: Array<{ key: string; value: string }>) => void;
+}) {
+  const rows = items.length > 0 ? items : [{ key: "", value: "" }];
+  return (
+    <div className="visual-pairs">
+      {rows.map((item, index) => (
+        <div className="visual-pair-row" key={index}>
+          <input
+            value={item.key}
+            placeholder={keyPlaceholder}
+            onChange={(event) => onChange(rows.map((row, i) => (i === index ? { ...row, key: event.target.value } : row)))}
+          />
+          <input
+            value={item.value}
+            placeholder={valuePlaceholder}
+            onChange={(event) => onChange(rows.map((row, i) => (i === index ? { ...row, value: event.target.value } : row)))}
+          />
+          <button type="button" disabled={rows.length === 1} onClick={() => onChange(rows.filter((_, i) => i !== index))}>
+            删除
+          </button>
+        </div>
+      ))}
+      <button type="button" className="subtle-action" onClick={() => onChange([...rows, { key: "", value: "" }])}>
+        + 添加字段
+      </button>
+    </div>
+  );
 }
 
 function StudioModal({
