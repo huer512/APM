@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import * as api from "../lib/api";
-import type { AttachSnapshot } from "../lib/types";
+import type { AttachSnapshot, RunDetailResponse, WorkflowDetail } from "../lib/types";
+import { MarkdownContent } from "../components/MarkdownContent";
 
 interface AttachPanelProps {
   runId: string;
@@ -8,21 +10,38 @@ interface AttachPanelProps {
 
 export function AttachPanel({ runId }: AttachPanelProps) {
   const [snapshot, setSnapshot] = useState<AttachSnapshot | null>(null);
+  const [detail, setDetail] = useState<RunDetailResponse | null>(null);
+  const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
   const [selectedStage, setSelectedStage] = useState("");
   const [selectedPrompt, setSelectedPrompt] = useState("");
   const [message, setMessage] = useState("");
   const [toolOnly, setToolOnly] = useState(false);
   const [status, setStatus] = useState("");
   const [attached, setAttached] = useState(false);
+  const [collapsedToolGroups, setCollapsedToolGroups] = useState<Record<string, boolean>>({});
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const eventListRef = useRef<HTMLDivElement | null>(null);
+  const [messagePinned, setMessagePinned] = useState(true);
+  const [eventsPinned, setEventsPinned] = useState(true);
 
   const load = async () => {
-    const snap = await api.attachSnapshot(runId);
+    const [snap, runDetail] = await Promise.all([
+      api.attachSnapshot(runId),
+      api.fetchRunDetail(runId).catch(() => null),
+    ]);
+    const workflowDetail = await api.fetchWorkflow(snap.run.entryName).catch(() => null);
     setSnapshot(snap);
-    const stages = Object.keys(snap.stagePrompts).sort();
+    setDetail(runDetail);
+    setWorkflow(workflowDetail);
+    const stages = getOrderedStageItems(snap, runDetail, workflowDetail).map((stage) => stage.name);
     if (!selectedStage || !stages.includes(selectedStage)) {
-      setSelectedStage(stages[0] ?? snap.run.currentStage ?? "");
+      setSelectedStage((snap.run.currentStage && stages.includes(snap.run.currentStage) ? snap.run.currentStage : stages[0]) ?? "");
     }
-    const prompts = snap.stagePrompts[selectedStage] ?? [];
+    const nextStage = selectedStage && stages.includes(selectedStage) ? selectedStage : (stages[0] ?? snap.run.currentStage ?? "");
+    const prompts = workflowDetail?.stages.find((stage) => stage.name === nextStage)?.prompts
+      ?? runDetail?.stages.find((stage) => stage.name === nextStage)?.prompts
+      ?? snap.stagePrompts[nextStage]
+      ?? [];
     if (!selectedPrompt || !prompts.includes(selectedPrompt)) {
       setSelectedPrompt(snap.run.currentPrompt ?? prompts[0] ?? "");
     }
@@ -35,6 +54,9 @@ export function AttachPanel({ runId }: AttachPanelProps) {
     }, 1000);
     return () => clearInterval(timer);
   }, [runId, selectedStage, selectedPrompt]);
+
+  usePinnedScroll(messageListRef, messagePinned, [selectedStage, selectedPrompt, snapshot?.messageHistoryByStagePrompt]);
+  usePinnedScroll(eventListRef, eventsPinned, [toolOnly, snapshot?.recentEvents.length]);
 
   const beginAttach = async () => {
     await api.attachBegin(runId);
@@ -65,86 +87,136 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   };
 
   if (!snapshot) {
-    return <p>加载 Attach 快照…</p>;
+    return <div className="panel attach-loading">加载 Attach 快照...</div>;
   }
 
-  const promptsInStage = snapshot.stagePrompts[selectedStage] ?? [];
+  const stageItems = getOrderedStageItems(snapshot, detail, workflow);
+  const promptsInStage = stageItems.find((stage) => stage.name === selectedStage)?.prompts ?? snapshot.stagePrompts[selectedStage] ?? [];
   const msgKey = selectedStage && selectedPrompt ? `${selectedStage}.${selectedPrompt}` : "";
   const messages = msgKey ? (snapshot.messageHistoryByStagePrompt[msgKey] ?? []) : [];
+  const displayMessages = buildDisplayMessages(messages);
   const recentEvents = toolOnly
     ? snapshot.recentEvents.filter((e) => e.kind === "tool")
     : snapshot.recentEvents;
 
   return (
-    <div>
-      <div className="toolbar">
-        {!attached ? (
-          <button type="button" className="primary" onClick={() => void beginAttach()}>
-            开始 Attach
+    <div className="attach-panel">
+      <section className="attach-control-panel">
+        <div className="attach-state-grid">
+          <div>
+            <span>运行状态</span>
+            <strong className={`attach-state ${snapshot.run.status}`}>{snapshot.run.status}</strong>
+          </div>
+          <div>
+            <span>当前阶段</span>
+            <strong>{snapshot.run.currentStage ?? "-"}</strong>
+          </div>
+          <div>
+            <span>等待下一步</span>
+            <strong>{snapshot.run.waitingForNext ? "是" : "否"}</strong>
+          </div>
+          <div>
+            <span>Attach 状态</span>
+            <strong>{attached ? "已接管" : "未接管"}</strong>
+          </div>
+        </div>
+        <div className="attach-actions">
+          {!attached ? (
+            <button type="button" className="primary" onClick={() => void beginAttach()}>
+              开始 Attach
+            </button>
+          ) : (
+            <button type="button" onClick={() => void endAttach()}>
+              结束 Attach
+            </button>
+          )}
+          <button type="button" className="primary" onClick={() => void nextStage()}>
+            下一阶段 (:next)
           </button>
-        ) : (
-          <button type="button" onClick={() => void endAttach()}>
-            结束 Attach
-          </button>
-        )}
-        <button type="button" className="primary" onClick={() => void nextStage()}>
-          下一阶段 (:next)
-        </button>
-        <label>
-          <input type="checkbox" checked={toolOnly} onChange={(e) => setToolOnly(e.target.checked)} />
-          仅 Tool 事件
-        </label>
-      </div>
-
-      <p>
-        状态: {snapshot.run.status} · 当前阶段: {snapshot.run.currentStage ?? "-"} · 等待下一步:{" "}
-        {snapshot.run.waitingForNext ? "是" : "否"}
-      </p>
-      {status && <p style={{ color: "var(--text-muted)" }}>{status}</p>}
+          <label className="attach-switch">
+            <span>仅 Tool 事件</span>
+            <span className="switch">
+              <input type="checkbox" checked={toolOnly} onChange={(e) => setToolOnly(e.target.checked)} />
+              <span />
+            </span>
+          </label>
+        </div>
+        {status && <div className="attach-status">{status}</div>}
+      </section>
 
       <div className="attach-grid">
-        <div className="card">
-          <h4>阶段</h4>
-          {Object.keys(snapshot.stagePrompts)
-            .sort()
-            .map((stage) => (
-              <button
-                key={stage}
-                type="button"
-                className={stage === selectedStage ? "active" : ""}
-                onClick={() => setSelectedStage(stage)}
-              >
-                {stage === selectedStage ? "* " : ""}
-                {stage}
-              </button>
-            ))}
-          <h4 style={{ marginTop: 16 }}>Prompt</h4>
-          {promptsInStage.map((prompt) => (
-            <button
-              key={prompt}
-              type="button"
-              className={prompt === selectedPrompt ? "active" : ""}
-              onClick={() => setSelectedPrompt(prompt)}
-            >
-              {prompt === selectedPrompt ? "* " : ""}
-              {prompt}
-            </button>
-          ))}
-        </div>
-
-        <div className="card">
-          <h4>消息历史</h4>
-          <div className="log-view" style={{ maxHeight: 200 }}>
-            {messages.slice(-12).map((m, i) => (
-              <div key={`${m.createdAt}-${i}`}>
-                [{m.role}] {m.content}
-              </div>
-            ))}
-            {messages.length === 0 && <span style={{ color: "var(--text-muted)" }}>暂无消息</span>}
+        <section className="panel attach-nav-card">
+          <div className="attach-nav-section">
+            <h3>阶段</h3>
+            <div className="attach-choice-list">
+              {stageItems
+                .map((stage) => {
+                  const state = getStageVisualState(stage.name, stage.status, snapshot);
+                  return (
+                  <button
+                    key={stage.name}
+                    type="button"
+                    className={`${stage.name === selectedStage ? "active" : ""} ${state}`}
+                    onClick={() => setSelectedStage(stage.name)}
+                  >
+                    <span>{stage.name}</span>
+                    <small>{stageStatusLabel(state)} · {stage.prompts.length} prompts</small>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <div className="toolbar" style={{ marginTop: 12 }}>
+          <div className="attach-nav-section">
+            <h3>Prompt</h3>
+            <div className="attach-choice-list">
+              {promptsInStage.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  className={prompt === selectedPrompt ? "active" : ""}
+                  onClick={() => setSelectedPrompt(prompt)}
+                >
+                  <span>{prompt}</span>
+                  <small>{prompt === snapshot.run.currentPrompt ? "当前 Agent" : "可选择"}</small>
+                </button>
+              ))}
+              {promptsInStage.length === 0 && <div className="empty-state">当前阶段暂无 Prompt</div>}
+            </div>
+          </div>
+        </section>
+
+        <section className="panel attach-message-card">
+          <div className="section-head">
+            <h2>消息历史</h2>
+            <span className="muted">{displayMessages.length} 组 / 原始 {messages.length} 条</span>
+          </div>
+          <div
+            className="attach-message-list"
+            ref={messageListRef}
+            onScroll={() => setMessagePinned(isNearBottom(messageListRef.current))}
+          >
+            {displayMessages.slice(-12).map((item, i) => (
+              item.type === "tool-group" ? (
+                <ToolMessageGroup
+                  key={item.id}
+                  item={item}
+                  collapsed={collapsedToolGroups[item.id] ?? true}
+                  onToggle={() => setCollapsedToolGroups((current) => ({ ...current, [item.id]: !(current[item.id] ?? true) }))}
+                />
+              ) : (
+                <article key={`${item.createdAt}-${i}`} className={item.role}>
+                  <header>
+                  <strong>{item.role}</strong>
+                  <span>{selectedPrompt || "-"}{item.count > 1 ? ` · 合并 ${item.count}` : ""}</span>
+                </header>
+                  <MarkdownContent content={item.content} className="attach-markdown" />
+                </article>
+              )
+            ))}
+            {displayMessages.length === 0 && <div className="empty-state">暂无消息</div>}
+          </div>
+          <div className="attach-composer">
             <input
-              style={{ flex: 1 }}
               placeholder={`向 ${selectedPrompt || "prompt"} 发送消息`}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -158,19 +230,222 @@ export function AttachPanel({ runId }: AttachPanelProps) {
               发送 (:msg)
             </button>
           </div>
-        </div>
+        </section>
       </div>
 
-      <div className="card">
-        <h4>最近事件</h4>
-        <div className="log-view">
+      <section className="panel attach-events-card">
+        <div className="section-head">
+          <h2>最近事件</h2>
+          <span className="muted">{toolOnly ? "Tool only" : "All events"}</span>
+        </div>
+        <div
+          className="attach-event-list"
+          ref={eventListRef}
+          onScroll={() => setEventsPinned(isNearBottom(eventListRef.current))}
+        >
           {recentEvents.slice(-25).map((ev) => (
-            <div key={ev.seq}>
-              [{ev.kind}] {JSON.stringify(ev.data)}
+            <div key={ev.seq} className={ev.level}>
+              <span>{ev.kind}</span>
+              <code>{JSON.stringify(ev.data)}</code>
             </div>
           ))}
+          {recentEvents.length === 0 && <div className="empty-state">暂无事件</div>}
         </div>
-      </div>
+      </section>
     </div>
   );
+}
+
+type AttachMessage = { role: string; content: string; createdAt: string };
+type TextDisplayMessage = AttachMessage & { type: "message"; count: number };
+type ToolDisplayGroup = { type: "tool-group"; id: string; createdAt: string; items: AttachMessage[] };
+type DisplayMessage = TextDisplayMessage | ToolDisplayGroup;
+type StageItem = { name: string; status: string; prompts: string[] };
+
+function buildDisplayMessages(messages: AttachMessage[]): DisplayMessage[] {
+  const display: DisplayMessage[] = [];
+  for (const message of messages) {
+    const normalized = message.content.trim();
+    if (!normalized) {
+      continue;
+    }
+    const normalizedMessage = { ...message, content: normalized };
+    const last = display[display.length - 1];
+    if (message.role === "tool") {
+      if (last?.type === "tool-group") {
+        last.items.push(normalizedMessage);
+        last.createdAt = message.createdAt;
+      } else {
+        display.push({
+          type: "tool-group",
+          id: `tool-${display.length}-${message.createdAt}`,
+          createdAt: message.createdAt,
+          items: [normalizedMessage],
+        });
+      }
+      continue;
+    }
+    if (last?.type === "message" && last.role === message.role) {
+      last.content = mergeText(last.content, normalized);
+      last.createdAt = message.createdAt;
+      last.count += 1;
+      continue;
+    }
+    display.push({ ...normalizedMessage, type: "message", count: 1 });
+  }
+  return display;
+}
+
+function ToolMessageGroup({
+  item,
+  collapsed,
+  onToggle,
+}: {
+  item: ToolDisplayGroup;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <article className="tool-group">
+      <header>
+        <div>
+          <strong>工具调用</strong>
+          <span>{item.items.length} 次连续调用</span>
+        </div>
+        <button type="button" onClick={onToggle}>
+          {collapsed ? "展开" : "收起"}
+        </button>
+      </header>
+      {!collapsed && (
+        <div className="tool-call-list">
+          {item.items.map((message, index) => {
+            const parsed = parseToolMessage(message.content);
+            return (
+              <div className="tool-call-card" key={`${message.createdAt}-${index}`}>
+                <div>
+                  <strong>{parsed.name}</strong>
+                  <span>{parsed.status}</span>
+                </div>
+                <code>{parsed.detail}</code>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function parseToolMessage(content: string): { name: string; status: string; detail: string } {
+  const match = content.match(/^\[tool:([^\]]+)\]\s+([^\s]+)\s*([\s\S]*)$/);
+  if (!match) {
+    return { name: "tool", status: "event", detail: content };
+  }
+  return {
+    name: match[1],
+    status: match[2],
+    detail: match[3] || "-",
+  };
+}
+
+function mergeText(left: string, right: string): string {
+  if (!left) {
+    return right;
+  }
+  if (!right || left.endsWith(right)) {
+    return left;
+  }
+  if (left.endsWith("\n") || right.startsWith("\n")) {
+    return `${left}${right}`;
+  }
+  return `${left}\n${right}`;
+}
+
+function inferStageStatus(stage: string, snapshot: AttachSnapshot): string {
+  if (snapshot.run.activeBatch.includes(stage) || snapshot.run.currentStage === stage) {
+    return "running";
+  }
+  if ((snapshot.promptHistoryByStage[stage]?.length ?? 0) > 0) {
+    return "finished";
+  }
+  return "pending";
+}
+
+function getOrderedStageItems(
+  snapshot: AttachSnapshot,
+  detail: RunDetailResponse | null,
+  workflow: WorkflowDetail | null,
+): StageItem[] {
+  const byName = new Map<string, StageItem>();
+  for (const stage of workflow?.stages ?? []) {
+    byName.set(stage.name, {
+      name: stage.name,
+      status: inferStageStatus(stage.name, snapshot),
+      prompts: stage.prompts,
+    });
+  }
+  for (const stage of detail?.stages ?? []) {
+    const found = byName.get(stage.name);
+    byName.set(stage.name, {
+      name: stage.name,
+      status: stage.status,
+      prompts: found?.prompts.length ? found.prompts : stage.prompts,
+    });
+  }
+  for (const stage of Object.keys(snapshot.stagePrompts)) {
+    if (!byName.has(stage)) {
+      byName.set(stage, {
+        name: stage,
+        status: inferStageStatus(stage, snapshot),
+        prompts: snapshot.stagePrompts[stage] ?? [],
+      });
+    }
+  }
+  return [...byName.values()];
+}
+
+function getStageVisualState(stage: string, status: string, snapshot: AttachSnapshot): "current" | "completed" | "failed" | "pending" {
+  if (snapshot.run.activeBatch.includes(stage) || snapshot.run.currentStage === stage || status === "running") {
+    return "current";
+  }
+  if (status === "failed") {
+    return "failed";
+  }
+  if (status === "finished" || (snapshot.promptHistoryByStage[stage]?.length ?? 0) > 0) {
+    return "completed";
+  }
+  return "pending";
+}
+
+function stageStatusLabel(state: "current" | "completed" | "failed" | "pending"): string {
+  if (state === "current") {
+    return "正在执行";
+  }
+  if (state === "completed") {
+    return "已执行";
+  }
+  if (state === "failed") {
+    return "失败";
+  }
+  return "待执行";
+}
+
+function usePinnedScroll(
+  ref: RefObject<HTMLElement | null>,
+  pinned: boolean,
+  deps: unknown[],
+): void {
+  useEffect(() => {
+    if (!pinned || !ref.current) {
+      return;
+    }
+    ref.current.scrollTop = ref.current.scrollHeight;
+  }, deps);
+}
+
+function isNearBottom(element: HTMLElement | null): boolean {
+  if (!element) {
+    return true;
+  }
+  return element.scrollHeight - element.scrollTop - element.clientHeight < 24;
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { EditorState } from "@codemirror/state";
 import { EditorView, lineNumbers } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
@@ -18,6 +19,7 @@ import {
   type StageDoc,
 } from "../lib/configDocuments";
 import { PageHeader } from "../components/UI";
+import { MarkdownContent } from "../components/MarkdownContent";
 
 type Category = "prompts" | "stages" | "hosts" | "entries";
 type StudioDialog =
@@ -27,10 +29,10 @@ type StudioDialog =
   | null;
 
 const CATEGORIES: Array<{ id: Category; label: string }> = [
-  { id: "prompts", label: "Prompts" },
-  { id: "stages", label: "Stages" },
-  { id: "hosts", label: "Hosts" },
-  { id: "entries", label: "Entries" },
+  { id: "prompts", label: "提示词" },
+  { id: "stages", label: "阶段" },
+  { id: "hosts", label: "主机" },
+  { id: "entries", label: "入口" },
 ];
 
 const EDITOR_THEME = EditorView.theme({
@@ -92,6 +94,7 @@ function validateFrontmatter(content: string): string | null {
 
 export function Studio() {
   const { daemonStatus } = useApp();
+  const [searchParams] = useSearchParams();
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [category, setCategory] = useState<Category>("entries");
@@ -110,6 +113,7 @@ export function Studio() {
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const [editorPercent, setEditorPercent] = useState(62);
   const viewRef = useRef<EditorView | null>(null);
+  const lastAutoOpenRef = useRef("");
 
   useEffect(() => {
     if (!daemonStatus?.httpReachable) {
@@ -117,6 +121,30 @@ export function Studio() {
     }
     void api.fetchCatalog().then(setCatalog);
   }, [daemonStatus?.httpReachable]);
+
+  useEffect(() => {
+    if (!catalog) {
+      return;
+    }
+    const requestedCategory = searchParams.get("category") as Category | null;
+    const requestedFile = searchParams.get("file");
+    if (!requestedCategory || !CATEGORIES.some((item) => item.id === requestedCategory)) {
+      return;
+    }
+    const key = `${requestedCategory}:${requestedFile ?? ""}`;
+    if (lastAutoOpenRef.current === key) {
+      return;
+    }
+    lastAutoOpenRef.current = key;
+    setCategory(requestedCategory);
+    const candidates = catalog[requestedCategory] ?? [];
+    const item = requestedFile
+      ? candidates.find((candidate) => candidate.path === requestedFile || candidate.name === requestedFile.replace(/\.md$/i, ""))
+      : candidates[0];
+    if (item) {
+      void loadFile(item, requestedCategory);
+    }
+  }, [catalog, searchParams]);
 
   useEffect(() => {
     if (!editorHost) {
@@ -172,7 +200,7 @@ export function Studio() {
     replaceEditorText(doc.raw);
   };
 
-  const loadFile = async (item: CatalogItem) => {
+  const loadFile = async (item: CatalogItem, kind: Category = category) => {
     setSelected(item);
     setValidationError(null);
     setLoadError(null);
@@ -180,7 +208,7 @@ export function Studio() {
     setLoadingFile(true);
     try {
       const text = await desktop.readApmTextFile(item.path);
-      setStructuredDocument(parseConfigDocument(category, item, text));
+      setStructuredDocument(parseConfigDocument(kind, item, text));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setContent("");
@@ -455,14 +483,12 @@ export function Studio() {
         <section className="studio-editor-panel">
           {selected ? (
             <>
-              <div className="studio-tabs">
-                <button type="button" className="active">
-                  {displayFileName(selected)}
-                </button>
+              <div className="studio-file-header">
+                <div>
+                  <strong>{displayFileName(selected)}</strong>
+                  <span>{selected.path}</span>
+                </div>
                 <span className="mode-pill">{editorMode === "visual" ? "可视化编辑" : "源码编辑"}</span>
-                <button type="button" onClick={() => setDialog({ type: "create", value: "" })}>
-                  +
-                </button>
               </div>
               {editorMode === "source" && (
                 <div className="markdown-toolbar">
@@ -1068,113 +1094,5 @@ function displayFileName(item: CatalogItem): string {
 }
 
 function MarkdownPreview({ content }: { content: string }) {
-  const blocks = parseMarkdownBlocks(content);
-  return (
-    <div className="markdown-preview">
-      {blocks.map((block, index) => {
-        if (block.type === "heading") {
-          const Tag = `h${Math.min(block.level, 3)}` as "h1" | "h2" | "h3";
-          return <Tag key={index}>{block.text}</Tag>;
-        }
-        if (block.type === "code") {
-          return <pre key={index}><code>{block.text}</code></pre>;
-        }
-        if (block.type === "list") {
-          return <ul key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul>;
-        }
-        if (block.type === "table") {
-          return <PreviewTable key={index} rows={block.rows} />;
-        }
-        return <p key={index}>{block.text}</p>;
-      })}
-    </div>
-  );
-}
-
-type PreviewBlock =
-  | { type: "heading"; level: number; text: string }
-  | { type: "paragraph"; text: string }
-  | { type: "code"; text: string }
-  | { type: "list"; items: string[] }
-  | { type: "table"; rows: string[][] };
-
-function parseMarkdownBlocks(input: string): PreviewBlock[] {
-  const lines = input.split("\n");
-  const blocks: PreviewBlock[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i] ?? "";
-    if (!line.trim()) {
-      i += 1;
-      continue;
-    }
-    if (line.trim().startsWith("```")) {
-      const code: string[] = [];
-      i += 1;
-      while (i < lines.length && !(lines[i] ?? "").trim().startsWith("```")) {
-        code.push(lines[i] ?? "");
-        i += 1;
-      }
-      blocks.push({ type: "code", text: code.join("\n") });
-      i += 1;
-      continue;
-    }
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading) {
-      blocks.push({ type: "heading", level: heading[1].length, text: heading[2] });
-      i += 1;
-      continue;
-    }
-    if (line.trim().startsWith("|") && line.includes("|")) {
-      const rows: string[][] = [];
-      while (i < lines.length && (lines[i] ?? "").trim().startsWith("|")) {
-        const raw = lines[i] ?? "";
-        if (!/^\s*\|?\s*:?-{3,}/.test(raw)) {
-          rows.push(raw.split("|").map((cell) => cell.trim()).filter(Boolean));
-        }
-        i += 1;
-      }
-      blocks.push({ type: "table", rows });
-      continue;
-    }
-    if (/^\s*[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i] ?? "")) {
-        items.push((lines[i] ?? "").replace(/^\s*[-*]\s+/, ""));
-        i += 1;
-      }
-      blocks.push({ type: "list", items });
-      continue;
-    }
-    const paragraph: string[] = [line.trim()];
-    i += 1;
-    while (i < lines.length && (lines[i] ?? "").trim() && !/^(#{1,6})\s+/.test(lines[i] ?? "")) {
-      if ((lines[i] ?? "").trim().startsWith("```") || /^\s*[-*]\s+/.test(lines[i] ?? "")) {
-        break;
-      }
-      paragraph.push((lines[i] ?? "").trim());
-      i += 1;
-    }
-    blocks.push({ type: "paragraph", text: paragraph.join(" ") });
-  }
-  return blocks;
-}
-
-function PreviewTable({ rows }: { rows: string[][] }) {
-  if (rows.length === 0) {
-    return null;
-  }
-  const [head, ...body] = rows;
-  return (
-    <table>
-      <thead>
-        <tr>{head.map((cell, index) => <th key={index}>{cell}</th>)}</tr>
-      </thead>
-      <tbody>
-        {body.map((row, rowIndex) => (
-          <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>
-        ))}
-      </tbody>
-    </table>
-  );
+  return <MarkdownContent content={content} className="markdown-preview" />;
 }
