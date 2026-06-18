@@ -1,4 +1,5 @@
 import net from "node:net";
+import { normalizeSocketPath } from "../utils/apm-home.js";
 
 export interface RpcRequest {
   id: string;
@@ -37,9 +38,10 @@ export async function rpcCall<T>(
   params: Record<string, unknown> = {},
 ): Promise<T> {
   const id = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const endpoint = normalizeSocketPath(socketPath);
 
   return new Promise<T>((resolve, reject) => {
-    const socket = net.createConnection(socketPath);
+    const socket = net.createConnection(endpoint);
     let buf = "";
     socket.on("connect", () => {
       socket.write(

@@ -204,6 +204,9 @@ async function buildSeaWithPostject({ name, outputPath, assets, seaConfigPath })
 
   await removeOutputIfExists(outputPath);
   await fs.copyFile(process.execPath, outputPath);
+  if (process.platform === "darwin") {
+    spawnSync("codesign", ["--remove-signature", outputPath], { stdio: "ignore" });
+  }
 
   const postject = runPostject(outputPath, blobPath);
   if (postject.status !== 0) {

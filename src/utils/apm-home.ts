@@ -29,6 +29,25 @@ export function resolveApmSocketPath(apmHomeDir = resolveApmHomeDir()): string {
   return path.join(apmHomeDir, "apm.sock");
 }
 
+export function normalizeSocketPath(socketPath: string): string {
+  if (process.platform !== "win32") {
+    return socketPath;
+  }
+  if (socketPath.startsWith("\\\\.\\pipe\\")) {
+    return socketPath;
+  }
+  const safeName = socketPath
+    .replace(/^[a-zA-Z]:/, "")
+    .replace(/[^a-zA-Z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(-180);
+  return `\\\\.\\pipe\\apm-${safeName || "default"}`;
+}
+
+export function isNamedPipePath(socketPath: string): boolean {
+  return process.platform === "win32" && socketPath.startsWith("\\\\.\\pipe\\");
+}
+
 export function resolveApmHttpTokenPath(apmHomeDir = resolveApmHomeDir()): string {
   return path.join(apmHomeDir, "state", "http.token");
 }

@@ -22,8 +22,10 @@ import { ensureDir } from "../utils/fs.js";
 import {
   ensureApmHomeInitialized,
   ensureHttpToken,
+  isNamedPipePath,
   loadApmConfig,
   loadApmConfigRaw,
+  normalizeSocketPath,
   resolveHttpListen,
   saveApmConfig,
   type ApmConfigFile,
@@ -120,7 +122,7 @@ export class ApmDaemonServer {
 
   public constructor(options: DaemonOptions) {
     this.root = options.workspaceRoot;
-    this.socketPath = options.socketPath;
+    this.socketPath = normalizeSocketPath(options.socketPath);
     this.store = new RunStore(path.join(this.root, "state"));
     this.runner = new AgentRunner({
       apiKeyProvider: () => this.cursorApiKey,
@@ -139,7 +141,9 @@ export class ApmDaemonServer {
     const config = await loadApmConfig(this.root);
     this.cursorApiKey = config.cursorApiKey;
     this.httpToken = await ensureHttpToken(this.root);
-    await ensureDir(path.dirname(this.socketPath));
+    if (!isNamedPipePath(this.socketPath)) {
+      await ensureDir(path.dirname(this.socketPath));
+    }
     await this.store.init();
     await this.safeUnlinkSocket();
     this.server = net.createServer((socket) => this.handleSocket(socket));
