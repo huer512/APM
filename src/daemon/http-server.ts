@@ -169,6 +169,7 @@ export class ApmHttpServer {
         const result = await this.daemon.handleMethod("run", {
           entryName: body.entryName,
           params: body.params ?? {},
+          hostName: typeof body.hostName === "string" ? body.hostName : undefined,
           detach: body.detach !== false,
           attach: body.attach === true,
         });
@@ -182,6 +183,7 @@ export class ApmHttpServer {
           level: url.searchParams.get("level") ?? undefined,
           kind: url.searchParams.get("kind") ?? undefined,
           query: url.searchParams.get("query") ?? undefined,
+          since: url.searchParams.get("since") ?? undefined,
           limit: Number(url.searchParams.get("limit") ?? "100"),
           offset: Number(url.searchParams.get("offset") ?? "0"),
         });

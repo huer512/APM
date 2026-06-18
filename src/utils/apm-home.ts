@@ -10,9 +10,15 @@ export interface ApmHttpConfig {
   port?: number;
 }
 
+export interface ApmLogsConfig {
+  retentionDays?: number;
+  defaultLimit?: number;
+}
+
 export interface ApmConfigFile {
   cursorApiKey?: string;
   http?: ApmHttpConfig;
+  logs?: ApmLogsConfig;
 }
 
 export function resolveApmHomeDir(): string {
@@ -53,6 +59,7 @@ export async function ensureApmHomeInitialized(apmHomeDir = resolveApmHomeDir())
         host: defaults.host,
         port: defaults.port,
       },
+      logs: defaultLogsConfig(),
     };
     await fs.writeFile(configPath, `${JSON.stringify(template, null, 2)}\n`, "utf8");
   }
@@ -86,9 +93,11 @@ export async function loadApmConfig(apmHomeDir = resolveApmHomeDir()): Promise<A
   const parsed = await loadApmConfigRaw(apmHomeDir);
   const cursorApiKey = typeof parsed.cursorApiKey === "string" ? parsed.cursorApiKey.trim() : "";
   const http = normalizeHttpConfig(parsed.http);
+  const logs = normalizeLogsConfig(parsed.logs);
   return {
     cursorApiKey: cursorApiKey || undefined,
     http,
+    logs,
   };
 }
 
@@ -98,6 +107,7 @@ export async function saveApmConfig(apmHomeDir: string, patch: ApmConfigFile): P
     ...current,
     ...patch,
     http: patch.http !== undefined ? { ...current.http, ...patch.http } : current.http,
+    logs: patch.logs !== undefined ? { ...current.logs, ...patch.logs } : current.logs,
   };
   const configPath = path.join(apmHomeDir, "config.json");
   await fs.writeFile(configPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
@@ -116,6 +126,13 @@ export function resolveHttpListen(apmHomeDir: string, config: ApmConfigFile): { 
   return { host, port, enabled };
 }
 
+export function defaultLogsConfig(): Required<ApmLogsConfig> {
+  return {
+    retentionDays: 30,
+    defaultLimit: 200,
+  };
+}
+
 function normalizeHttpConfig(http: ApmHttpConfig | undefined): ApmHttpConfig | undefined {
   if (!http) {
     return undefined;
@@ -128,5 +145,19 @@ function normalizeHttpConfig(http: ApmHttpConfig | undefined): ApmHttpConfig | u
       typeof http.port === "number" && Number.isFinite(http.port) && http.port >= 0
         ? Math.floor(http.port)
         : defaults.port,
+  };
+}
+
+function normalizeLogsConfig(logs: ApmLogsConfig | undefined): ApmLogsConfig {
+  const defaults = defaultLogsConfig();
+  return {
+    retentionDays:
+      typeof logs?.retentionDays === "number" && Number.isFinite(logs.retentionDays) && logs.retentionDays >= 0
+        ? Math.floor(logs.retentionDays)
+        : defaults.retentionDays,
+    defaultLimit:
+      typeof logs?.defaultLimit === "number" && Number.isFinite(logs.defaultLimit) && logs.defaultLimit > 0
+        ? Math.floor(logs.defaultLimit)
+        : defaults.defaultLimit,
   };
 }

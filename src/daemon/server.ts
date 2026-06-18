@@ -46,6 +46,7 @@ export interface ConfigGetResponse {
   cursorApiKey: string;
   hasApiKey: boolean;
   http: ApmConfigFile["http"];
+  logs: ApmConfigFile["logs"];
   apmHome: string;
   httpBaseUrl?: string;
 }
@@ -296,6 +297,7 @@ export class ApmDaemonServer {
       cursorApiKey: key,
       hasApiKey: key.trim().length > 0,
       http: config.http,
+      logs: config.logs,
       apmHome: this.root,
       httpBaseUrl: listen.enabled ? (this.httpServer?.baseUrl ?? `http://${listen.host}:${listen.port}`) : undefined,
     };
@@ -485,6 +487,9 @@ export class ApmDaemonServer {
     if (params.http && typeof params.http === "object") {
       patch.http = params.http as ApmConfigFile["http"];
     }
+    if (params.logs && typeof params.logs === "object") {
+      patch.logs = params.logs as ApmConfigFile["logs"];
+    }
     await saveApmConfig(this.root, patch);
     const config = await loadApmConfig(this.root);
     this.cursorApiKey = config.cursorApiKey;
@@ -512,6 +517,9 @@ export class ApmDaemonServer {
     this.cursorApiKey = config.cursorApiKey;
     const entryName = asString(params.entryName, "entryName");
     const variables = (params.params as Dict) ?? {};
+    const hostName = typeof params.hostName === "string" && params.hostName.trim().length > 0
+      ? params.hostName.trim()
+      : undefined;
     const attach = params.attach === true;
     const runId = createRunId();
     const now = new Date().toISOString();
@@ -536,7 +544,7 @@ export class ApmDaemonServer {
       this.hitl.setAttached(runId, true);
     }
 
-    void this.executeRun(runId, entryName).catch(async (error) => {
+    void this.executeRun(runId, entryName, hostName).catch(async (error) => {
       await this.store.updateRun(runId, {
         status: "failed",
         error: error instanceof Error ? error.message : String(error),
@@ -587,7 +595,15 @@ export class ApmDaemonServer {
   }
 
   private async listEvents(params: Record<string, unknown>): Promise<{ events: ApmEvent[]; total: number }> {
-    const limit = asNumber(params.limit, "limit", 100);
+    const config = await loadApmConfig(this.root);
+    const configuredLimit = Number(config.logs?.defaultLimit ?? 200);
+    const retentionDays = Number(config.logs?.retentionDays ?? 30);
+    const since = typeof params.since === "string" && params.since.trim().length > 0
+      ? params.since.trim()
+      : retentionDays > 0
+        ? new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString()
+        : undefined;
+    const limit = asNumber(params.limit, "limit", Number.isFinite(configuredLimit) ? configuredLimit : 200);
     const offset = asNumber(params.offset, "offset", 0);
     const runId = typeof params.runId === "string" && params.runId.trim() ? params.runId.trim() : undefined;
     const level = typeof params.level === "string" && params.level.trim()
@@ -597,7 +613,7 @@ export class ApmDaemonServer {
       ? (params.kind.trim() as ApmEvent["kind"])
       : undefined;
     const query = typeof params.query === "string" ? params.query : undefined;
-    return this.store.listEvents({ runId, level, kind, query, limit, offset });
+    return this.store.listEvents({ runId, level, kind, query, since, limit, offset });
   }
 
   private async getRunDetail(runId: string): Promise<{
@@ -684,13 +700,13 @@ export class ApmDaemonServer {
     });
   }
 
-  private async executeRun(runId: string, entryName: string): Promise<void> {
+  private async executeRun(runId: string, entryName: string, hostName?: string): Promise<void> {
     try {
       const run = await this.store.getRun(runId);
       if (!run) {
         throw new Error(`Run "${runId}" disappeared.`);
       }
-      const bundle = await loadWorkflowBundle(this.root, entryName);
+      const bundle = await loadWorkflowBundle(this.root, entryName, { hostName });
       await this.store.updateRun(runId, { hostName: bundle.host.name });
       await this.store.appendEvent(runId, {
         runId,

@@ -10,8 +10,6 @@ export function Workflows() {
   const navigate = useNavigate();
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("");
-  const [busy, setBusy] = useState("");
 
   const load = async () => {
     setWorkflows(await api.fetchWorkflows());
@@ -35,41 +33,15 @@ export function Workflows() {
     );
   }, [query, workflows]);
 
-  const runWorkflow = async (workflow: WorkflowSummary, attach = false) => {
-    setBusy(workflow.name);
-    setStatus("");
-    try {
-      const params = Object.fromEntries(
-        Object.entries(workflow.variables ?? {}).map(([key, value]) => [key, value ?? ""]),
-      );
-      const { runId } = await api.createRun({
-        entryName: workflow.name,
-        params,
-        detach: !attach,
-        attach,
-      });
-      navigate(`/runs/${runId}${attach ? "?tab=attach" : ""}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy("");
-    }
-  };
-
   return (
     <div>
       <PageHeader
         title="工作流列表"
         description="管理和运行 APM_HOME 中的 Agent 工作流。"
         actions={
-          <>
-            <button type="button" onClick={() => void load()}>
-              刷新
-            </button>
-            <Link className="button primary" to="/studio">
-              新建 / 编辑
-            </Link>
-          </>
+          <button type="button" onClick={() => void load()}>
+            刷新
+          </button>
         }
       />
       <div className="toolbar surface-toolbar">
@@ -79,7 +51,6 @@ export function Workflows() {
           placeholder="搜索工作流名称、描述、主机..."
         />
       </div>
-      {status && <div className="notice danger inline">{status}</div>}
       <div className="workflow-grid">
         {filtered.map((workflow) => (
           <article key={workflow.name} className="workflow-card">
@@ -100,27 +71,23 @@ export function Workflows() {
             </div>
             {workflow.error && <p className="danger-text">{workflow.error}</p>}
             <div className="card-actions">
-              <button
-                type="button"
-                className="primary"
-                disabled={workflow.status !== "valid" || busy === workflow.name}
-                onClick={() => void runWorkflow(workflow)}
+              <Link
+                className={`button primary ${workflow.status !== "valid" ? "disabled" : ""}`}
+                to={workflow.status === "valid" ? `/new-run?workflow=${encodeURIComponent(workflow.name)}` : "#"}
               >
                 运行
-              </button>
+              </Link>
               <button
                 type="button"
-                disabled={workflow.status !== "valid" || busy === workflow.name}
-                onClick={() => void runWorkflow(workflow, true)}
+                onClick={() => navigate(`/workflows/view/${encodeURIComponent(workflow.name)}`)}
               >
-                Attach 运行
+                查看
               </button>
-              <Link to={`/studio?category=entries&file=${encodeURIComponent(workflow.path)}`}>编辑</Link>
             </div>
           </article>
         ))}
       </div>
-      {filtered.length === 0 && <EmptyState title="暂无工作流" description="请先导入模板或在工作流工作室中新建 entry。" />}
+      {filtered.length === 0 && <EmptyState title="暂无工作流" description="请先导入模板或在配置管理中新建入口。" />}
     </div>
   );
 }

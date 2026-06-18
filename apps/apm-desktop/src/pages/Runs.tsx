@@ -57,11 +57,11 @@ export function Runs() {
   return (
     <div>
       <PageHeader
-        title="运行实例"
-        description="查看和管理所有工作流运行实例。"
+        title="实例列表"
+        description="查看和管理所有工作流运行记录。"
         actions={
           <>
-            <Link className="button primary" to="/workflows">新建运行</Link>
+            <Link className="button primary" to="/new-run">新建运行</Link>
             <button type="button" onClick={() => void load()}>刷新</button>
           </>
         }
@@ -105,13 +105,13 @@ export function Runs() {
                 <td>
                   <Link to={`/runs/${run.id}`}>查看</Link>
                   {" · "}
-                  <Link to={`/runs/${run.id}?tab=attach`}>Attach</Link>
+                  <Link to={`/runs/${run.id}?tab=attach`}>接管</Link>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {filtered.length === 0 && <EmptyState title="没有匹配的运行实例" description="调整筛选条件，或从工作流页面启动一次运行。" />}
+        {filtered.length === 0 && <EmptyState title="没有匹配的实例" description="调整筛选条件，或从工作流页面启动一次运行。" />}
       </section>
     </div>
   );

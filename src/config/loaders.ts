@@ -37,12 +37,17 @@ export async function buildCatalog(rootDir: string): Promise<Catalog> {
   return { prompts, stages, hosts, entries };
 }
 
-export async function loadWorkflowBundle(rootDir: string, entryName: string): Promise<WorkflowBundle> {
+export async function loadWorkflowBundle(
+  rootDir: string,
+  entryName: string,
+  options: { hostName?: string } = {},
+): Promise<WorkflowBundle> {
   const catalog = await buildCatalog(rootDir);
   const entryPath = mustGet(catalog.entries, entryName, "entry");
   const entry = await loadEntry(entryName, entryPath);
-  const hostPath = mustGet(catalog.hosts, entry.host, "host");
-  const host = await loadHost(entry.host, hostPath, rootDir);
+  const selectedHost = options.hostName?.trim() || entry.host;
+  const hostPath = mustGet(catalog.hosts, selectedHost, "host");
+  const host = await loadHost(selectedHost, hostPath, rootDir);
 
   const stageQueue = [entry.entry];
   const stages = new Map<string, StageDefinition>();

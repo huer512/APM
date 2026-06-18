@@ -61,7 +61,7 @@ export function RunDetail() {
 
   return (
     <div>
-      <p className="breadcrumb"><Link to="/runs">运行实例</Link> / {runId}</p>
+      <p className="breadcrumb"><Link to="/runs">实例列表</Link> / {runId}</p>
       <PageHeader
         title={runId}
         actions={
@@ -69,7 +69,7 @@ export function RunDetail() {
             {run && <StatusBadge status={run.status} />}
             {(run?.status === "running" || run?.status === "paused") && <button type="button" onClick={() => void stop()}>停止运行</button>}
             {run && (run.status === "failed" || run.status === "finished" || run.status === "stopped") && <button type="button" className="primary" onClick={() => void retry()}>重新运行</button>}
-            <button type="button" onClick={() => setSearchParams({ tab: "attach" })}>Attach 人工介入</button>
+            <button type="button" onClick={() => setSearchParams({ tab: "attach" })}>接管运行</button>
           </>
         }
       />
@@ -84,7 +84,7 @@ export function RunDetail() {
       )}
       <div className="tabs">
         <button type="button" className={tab === "overview" ? "active" : ""} onClick={() => setSearchParams({})}>运行详情</button>
-        <button type="button" className={tab === "attach" ? "active" : ""} onClick={() => setSearchParams({ tab: "attach" })}>人工介入</button>
+        <button type="button" className={tab === "attach" ? "active" : ""} onClick={() => setSearchParams({ tab: "attach" })}>接管</button>
       </div>
 
       {tab === "attach" && <AttachPanel runId={runId} />}

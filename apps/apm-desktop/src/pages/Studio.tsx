@@ -376,7 +376,7 @@ export function Studio() {
   return (
     <div className="studio-page">
       <PageHeader
-        title="配置工作室"
+        title="配置管理"
         description="编辑 APM_HOME 下的 Markdown 配置。保存后需新启动 run 才会加载新配置。"
         actions={
           <>

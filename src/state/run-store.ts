@@ -158,6 +158,7 @@ export class RunStore {
     level?: ApmEvent["level"];
     kind?: ApmEvent["kind"];
     query?: string;
+    since?: string;
     limit?: number;
     offset?: number;
   } = {}): Promise<{ events: ApmEvent[]; total: number }> {
@@ -168,7 +169,15 @@ export class RunStore {
       events.push(...(await this.readAllEvents(runId)));
     }
     const query = options.query?.trim().toLowerCase();
+    const since = options.since ? new Date(options.since).getTime() : Number.NaN;
     const filtered = events
+      .filter((event) => {
+        if (!Number.isFinite(since)) {
+          return true;
+        }
+        const ts = new Date(event.ts).getTime();
+        return Number.isFinite(ts) && ts >= since;
+      })
       .filter((event) => !options.level || event.level === options.level)
       .filter((event) => !options.kind || event.kind === options.kind)
       .filter((event) => {

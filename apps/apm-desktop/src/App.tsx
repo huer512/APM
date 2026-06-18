@@ -3,11 +3,11 @@ import { AppProvider, useApp } from "./context/AppContext";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./pages/Dashboard";
 import { Workflows } from "./pages/Workflows";
+import { WorkflowView } from "./pages/WorkflowView";
 import { Runs } from "./pages/Runs";
+import { NewRun } from "./pages/NewRun";
 import { RunDetail } from "./pages/RunDetail";
-import { Intervention } from "./pages/Intervention";
 import { Studio } from "./pages/Studio";
-import { Hosts } from "./pages/Hosts";
 import { Logs } from "./pages/Logs";
 import { Settings } from "./pages/Settings";
 
@@ -33,11 +33,12 @@ function AppRoutes() {
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="workflows" element={<Workflows />} />
+          <Route path="workflows/view/*" element={<WorkflowView />} />
+          <Route path="new-run" element={<NewRun />} />
           <Route path="runs" element={<Runs />} />
           <Route path="runs/:runId" element={<RunDetail />} />
-          <Route path="intervention" element={<Intervention />} />
           <Route path="studio" element={<Studio />} />
-          <Route path="hosts" element={<Hosts />} />
+          <Route path="hosts" element={<Navigate to="/studio?category=hosts" replace />} />
           <Route path="logs" element={<Logs />} />
           <Route path="settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />

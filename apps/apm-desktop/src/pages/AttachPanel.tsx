@@ -61,13 +61,13 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   const beginAttach = async () => {
     await api.attachBegin(runId);
     setAttached(true);
-    setStatus("已进入 Attach 模式");
+    setStatus("已进入接管模式");
   };
 
   const endAttach = async () => {
     await api.attachEnd(runId);
     setAttached(false);
-    setStatus("已退出 Attach 模式");
+    setStatus("已退出接管模式");
   };
 
   const sendMessage = async () => {
@@ -87,7 +87,7 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   };
 
   if (!snapshot) {
-    return <div className="panel attach-loading">加载 Attach 快照...</div>;
+    return <div className="panel attach-loading">加载接管快照...</div>;
   }
 
   const stageItems = getOrderedStageItems(snapshot, detail, workflow);
@@ -116,18 +116,18 @@ export function AttachPanel({ runId }: AttachPanelProps) {
             <strong>{snapshot.run.waitingForNext ? "是" : "否"}</strong>
           </div>
           <div>
-            <span>Attach 状态</span>
+            <span>接管状态</span>
             <strong>{attached ? "已接管" : "未接管"}</strong>
           </div>
         </div>
         <div className="attach-actions">
           {!attached ? (
             <button type="button" className="primary" onClick={() => void beginAttach()}>
-              开始 Attach
+              开始接管
             </button>
           ) : (
             <button type="button" onClick={() => void endAttach()}>
-              结束 Attach
+              结束接管
             </button>
           )}
           <button type="button" className="primary" onClick={() => void nextStage()}>

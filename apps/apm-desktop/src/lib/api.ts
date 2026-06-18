@@ -76,6 +76,7 @@ export async function retryRun(runId: string): Promise<{ runId: string }> {
 export async function createRun(body: {
   entryName: string;
   params: Record<string, unknown>;
+  hostName?: string;
   detach?: boolean;
   attach?: boolean;
 }): Promise<{ runId: string }> {
@@ -84,6 +85,7 @@ export async function createRun(body: {
     body: JSON.stringify({
       entryName: body.entryName,
       params: body.params,
+      hostName: body.hostName,
       detach: body.detach !== false,
       attach: body.attach === true,
     }),
@@ -168,6 +170,7 @@ export async function fetchEvents(options: {
   level?: string;
   kind?: string;
   query?: string;
+  since?: string;
   limit?: number;
   offset?: number;
 } = {}): Promise<{ events: ApmEvent[]; total: number }> {
@@ -187,6 +190,7 @@ export async function fetchConfig(): Promise<ConfigResponse> {
 export async function updateConfig(patch: {
   cursorApiKey?: string;
   http?: { enabled?: boolean; host?: string; port?: number };
+  logs?: { retentionDays?: number; defaultLimit?: number };
 }): Promise<ConfigResponse> {
   return apiFetch("/config", { method: "PUT", body: JSON.stringify(patch) });
 }

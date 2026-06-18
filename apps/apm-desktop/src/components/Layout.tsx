@@ -7,10 +7,8 @@ export function Layout() {
   const navItems = [
     { to: "/", label: "总览", end: true },
     { to: "/workflows", label: "工作流" },
-    { to: "/runs", label: "运行实例" },
-    { to: "/intervention", label: "人工介入" },
-    { to: "/studio", label: "工作流工作室" },
-    { to: "/hosts", label: "主机与连接" },
+    { to: "/runs", label: "实例列表" },
+    { to: "/studio", label: "配置管理" },
     { to: "/logs", label: "日志与事件" },
     { to: "/settings", label: "设置" },
   ];

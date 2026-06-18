@@ -31,7 +31,7 @@ export function Dashboard() {
         actions={
           <>
             <button type="button" onClick={() => void load()}>刷新</button>
-            <Link className="button primary" to="/workflows">新建运行</Link>
+            <Link className="button primary" to="/new-run">新建运行</Link>
           </>
         }
       />
@@ -39,7 +39,7 @@ export function Dashboard() {
       {!daemonStatus?.httpReachable && (
         <section className="panel hero-panel">
           <h2>Daemon 未响应</h2>
-          <p>桌面端需要本机 Daemon 提供运行、日志、配置和 Attach API。</p>
+          <p>桌面端需要本机 Daemon 提供运行、日志、配置和接管 API。</p>
           <div className="toolbar">
             <button type="button" className="primary" onClick={() => void startDaemon()}>启动 Daemon</button>
             <button type="button" onClick={() => void restartDaemon()}>重启 Daemon</button>

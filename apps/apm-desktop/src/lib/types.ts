@@ -48,6 +48,10 @@ export interface ConfigResponse {
     host?: string;
     port?: number;
   };
+  logs?: {
+    retentionDays?: number;
+    defaultLimit?: number;
+  };
   apmHome: string;
   httpBaseUrl?: string;
 }

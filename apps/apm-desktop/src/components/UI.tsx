@@ -4,17 +4,19 @@ import type { RunRecord } from "../lib/types";
 export function PageHeader({
   title,
   description,
+  descriptionNode,
   actions,
 }: {
   title: string;
   description?: string;
+  descriptionNode?: ReactNode;
   actions?: ReactNode;
 }) {
   return (
     <div className="page-header">
       <div>
         <h1 className="page-title">{title}</h1>
-        {description && <p className="page-description">{description}</p>}
+        {descriptionNode ?? (description && <p className="page-description">{description}</p>)}
       </div>
       {actions && <div className="page-actions">{actions}</div>}
     </div>
