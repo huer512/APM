@@ -3,6 +3,8 @@ import type { RefObject } from "react";
 import * as api from "../lib/api";
 import type { AttachSnapshot, RunDetailResponse, WorkflowDetail } from "../lib/types";
 import { MarkdownContent } from "../components/MarkdownContent";
+import { buildDisplayMessages } from "../lib/messageDisplay";
+import type { MessageLike, ToolDisplayGroup } from "../lib/messageDisplay";
 
 interface AttachPanelProps {
   runId: string;
@@ -256,45 +258,8 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   );
 }
 
-type AttachMessage = { role: string; content: string; createdAt: string };
-type TextDisplayMessage = AttachMessage & { type: "message"; count: number };
-type ToolDisplayGroup = { type: "tool-group"; id: string; createdAt: string; items: AttachMessage[] };
-type DisplayMessage = TextDisplayMessage | ToolDisplayGroup;
+type AttachMessage = MessageLike;
 type StageItem = { name: string; status: string; prompts: string[] };
-
-function buildDisplayMessages(messages: AttachMessage[]): DisplayMessage[] {
-  const display: DisplayMessage[] = [];
-  for (const message of messages) {
-    const normalized = message.content.trim();
-    if (!normalized) {
-      continue;
-    }
-    const normalizedMessage = { ...message, content: normalized };
-    const last = display[display.length - 1];
-    if (message.role === "tool") {
-      if (last?.type === "tool-group") {
-        last.items.push(normalizedMessage);
-        last.createdAt = message.createdAt;
-      } else {
-        display.push({
-          type: "tool-group",
-          id: `tool-${display.length}-${message.createdAt}`,
-          createdAt: message.createdAt,
-          items: [normalizedMessage],
-        });
-      }
-      continue;
-    }
-    if (last?.type === "message" && last.role === message.role) {
-      last.content = mergeText(last.content, normalized);
-      last.createdAt = message.createdAt;
-      last.count += 1;
-      continue;
-    }
-    display.push({ ...normalizedMessage, type: "message", count: 1 });
-  }
-  return display;
-}
 
 function ToolMessageGroup({
   item,
@@ -346,19 +311,6 @@ function parseToolMessage(content: string): { name: string; status: string; deta
     status: match[2],
     detail: match[3] || "-",
   };
-}
-
-function mergeText(left: string, right: string): string {
-  if (!left) {
-    return right;
-  }
-  if (!right || left.endsWith(right)) {
-    return left;
-  }
-  if (left.endsWith("\n") || right.startsWith("\n")) {
-    return `${left}${right}`;
-  }
-  return `${left}\n${right}`;
 }
 
 function inferStageStatus(stage: string, snapshot: AttachSnapshot): string {

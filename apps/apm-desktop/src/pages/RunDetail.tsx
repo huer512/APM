@@ -5,6 +5,8 @@ import { useApp } from "../context/AppContext";
 import type { RunDetailResponse } from "../lib/types";
 import { AttachPanel } from "./AttachPanel";
 import { PageHeader, StatusBadge, formatDate, formatDuration } from "../components/UI";
+import { MarkdownContent } from "../components/MarkdownContent";
+import { buildDisplayMessages } from "../lib/messageDisplay";
 
 export function RunDetail() {
   const { runId = "" } = useParams();
@@ -41,7 +43,7 @@ export function RunDetail() {
   }, [daemonStatus?.httpReachable, runId]);
 
   const run = detail?.run;
-  const latestMessages = useMemo(() => (detail?.messages ?? []).slice(-12), [detail?.messages]);
+  const latestMessages = useMemo(() => buildDisplayMessages(detail?.messages ?? []).slice(-12), [detail?.messages]);
 
   const stop = async () => {
     if (!runId) {
@@ -117,13 +119,23 @@ export function RunDetail() {
               <h2>消息</h2>
               <div className="message-list">
                 {latestMessages.map((item, index) => (
-                  <article key={`${item.createdAt}-${index}`} className={item.role}>
-                    <header>
-                      <strong>{item.prompt}</strong>
-                      <span>{item.role} · {formatDate(item.createdAt)}</span>
-                    </header>
-                    <p>{item.content}</p>
-                  </article>
+                  item.type === "tool-group" ? (
+                    <article key={item.id} className="tool-group">
+                      <header>
+                        <strong>{item.prompt ?? "tool"}</strong>
+                        <span>工具调用 · 合并 {item.items.length} · {formatDate(item.createdAt)}</span>
+                      </header>
+                      <p>{item.items.map((message) => message.content).join("\n")}</p>
+                    </article>
+                  ) : (
+                    <article key={`${item.createdAt}-${index}`} className={item.role}>
+                      <header>
+                        <strong>{item.prompt ?? "-"}</strong>
+                        <span>{item.role} · {formatDate(item.createdAt)}{item.count > 1 ? ` · 合并 ${item.count}` : ""}</span>
+                      </header>
+                      <MarkdownContent content={item.content} className="message-markdown" />
+                    </article>
+                  )
                 ))}
               </div>
             </section>

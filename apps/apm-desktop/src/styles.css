@@ -1016,9 +1016,36 @@ textarea:focus {
   background: rgba(7, 16, 24, 0.65);
 }
 .message-list article.user { border-color: rgba(40, 208, 109, 0.28); }
+.message-list article.assistant { border-color: rgba(47, 129, 255, 0.28); }
+.message-list article.thinking { border-color: rgba(145, 105, 255, 0.3); }
 .message-list article.tool { border-color: rgba(255, 173, 47, 0.28); }
+.message-list article.tool-group { border-color: rgba(255, 173, 47, 0.3); }
 .message-list header { display: flex; justify-content: space-between; gap: 12px; color: var(--text-muted); }
 .message-list p { margin: 8px 0 0; white-space: pre-wrap; }
+.message-markdown {
+  margin-top: 8px;
+}
+.message-markdown h1,
+.message-markdown h2,
+.message-markdown h3 {
+  margin: 8px 0;
+  font-size: 15px;
+}
+.message-markdown p,
+.message-markdown li {
+  margin: 5px 0;
+  color: #d3e0ee;
+  line-height: 1.65;
+}
+.message-markdown ul {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.message-markdown pre {
+  margin: 8px 0;
+  max-height: 260px;
+  font-size: 12px;
+}
 .event-list { display: flex; flex-direction: column; gap: 8px; }
 .event-list div { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-soft); padding-bottom: 8px; }
 .failure-panel { border-color: rgba(255, 90, 82, 0.5); background: rgba(69, 20, 24, 0.36); margin-bottom: 16px; }
