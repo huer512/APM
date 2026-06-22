@@ -8,9 +8,10 @@ import { MessageHistoryList } from "../components/MessageHistoryList";
 
 interface AttachPanelProps {
   runId: string;
+  autoAttach?: boolean;
 }
 
-export function AttachPanel({ runId }: AttachPanelProps) {
+export function AttachPanel({ runId, autoAttach = false }: AttachPanelProps) {
   const [snapshot, setSnapshot] = useState<AttachSnapshot | null>(null);
   const [detail, setDetail] = useState<RunDetailResponse | null>(null);
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
@@ -58,7 +59,7 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   }, [runId]);
 
   useEffect(() => {
-    if (!snapshot || snapshot.run.id !== runId || snapshot.run.attachMode || autoAttachStarted) {
+    if (!autoAttach || !snapshot || snapshot.run.id !== runId || snapshot.run.attachMode || autoAttachStarted) {
       return;
     }
     setAutoAttachStarted(true);
@@ -70,9 +71,16 @@ export function AttachPanel({ runId }: AttachPanelProps) {
       .catch((error: unknown) => {
         setStatus(error instanceof Error ? error.message : "自动接管失败");
       });
-  }, [snapshot?.run.attachMode, snapshot?.run.id, autoAttachStarted, runId]);
+  }, [autoAttach, snapshot?.run.attachMode, snapshot?.run.id, autoAttachStarted, runId]);
 
   usePinnedScroll(messageListRef, messagePinned, [selectedStage, selectedPrompt, snapshot?.messageHistoryByStagePrompt]);
+
+  const beginAttach = async () => {
+    await api.attachBegin(runId);
+    setAutoAttachStarted(true);
+    setStatus("已进入接管模式");
+    await load();
+  };
 
   const endAttach = async () => {
     await api.attachEnd(runId);
@@ -130,9 +138,15 @@ export function AttachPanel({ runId }: AttachPanelProps) {
           </div>
         </div>
         <div className="attach-actions">
-          <button type="button" onClick={() => void endAttach()} disabled={!attached}>
-            退出接管
-          </button>
+          {attached ? (
+            <button type="button" onClick={() => void endAttach()}>
+              退出接管
+            </button>
+          ) : (
+            <button type="button" className="primary" onClick={() => void beginAttach()}>
+              进入接管
+            </button>
+          )}
           <button type="button" className="primary" onClick={() => void nextStage()}>
             下一阶段 (:next)
           </button>

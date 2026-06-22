@@ -105,7 +105,7 @@ export function Runs() {
                 <td>
                   <Link to={`/runs/${run.id}`}>查看</Link>
                   {" · "}
-                  <Link to={`/runs/${run.id}?tab=attach`}>接管</Link>
+                  <Link to={`/runs/${run.id}?tab=attach&autoAttach=1`}>接管</Link>
                 </td>
               </tr>
             ))}

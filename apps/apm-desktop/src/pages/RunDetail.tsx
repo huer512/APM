@@ -13,6 +13,7 @@ export function RunDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const tab = searchParams.get("tab") === "attach" ? "attach" : "overview";
+  const autoAttach = searchParams.get("autoAttach") === "1";
   const { daemonStatus } = useApp();
   const [detail, setDetail] = useState<RunDetailResponse | null>(null);
   const [selectedStage, setSelectedStage] = useState("");
@@ -108,7 +109,7 @@ export function RunDetail() {
         <button type="button" className={tab === "attach" ? "active" : ""} onClick={() => setSearchParams({ tab: "attach" })}>接管</button>
       </div>
 
-      {tab === "attach" && <AttachPanel runId={runId} />}
+      {tab === "attach" && <AttachPanel runId={runId} autoAttach={autoAttach} />}
       {tab === "overview" && detail && (
         <>
           {detail.failure && (

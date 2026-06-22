@@ -135,7 +135,7 @@ export function NewRun() {
         detach: true,
         attach,
       });
-      navigate(`/runs/${runId}${attach ? "?tab=attach" : ""}`);
+      navigate(`/runs/${runId}${attach ? "?tab=attach&autoAttach=1" : ""}`);
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : String(startError));
     } finally {
