@@ -62,14 +62,6 @@ export function RunDetail() {
     () => (detail?.messages ?? []).filter((message) => !selectedStage || message.stage === selectedStage),
     [detail?.messages, selectedStage],
   );
-  const scopedTools = useMemo(
-    () => (detail?.tools ?? []).filter((event) => !selectedStage || event.stage === selectedStage),
-    [detail?.tools, selectedStage],
-  );
-  const scopedEvents = useMemo(
-    () => (detail?.events ?? []).filter((event) => !selectedStage || event.stage === selectedStage),
-    [detail?.events, selectedStage],
-  );
   const latestMessages = useMemo(() => buildDisplayMessages(scopedMessages).slice(-12), [scopedMessages]);
 
   const stop = async () => {
@@ -177,27 +169,6 @@ export function RunDetail() {
                 ))}
               </div>
             </section>
-            <aside className="side-stack">
-              <section className="panel">
-                <h2>工具调用 ({scopedTools.length})</h2>
-                <div className="event-list">
-                  {scopedTools.slice(-8).map((event) => (
-                    <div key={event.seq}>
-                      <strong>{String(event.data.name ?? event.kind)}</strong>
-                      <span>{String(event.data.status ?? event.level)}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-              <section className="panel">
-                <h2>实时日志</h2>
-                <div className="log-view">
-                  {scopedEvents.slice(-30).map((event) => (
-                    <div key={event.seq}>#{event.seq} [{event.level}] {event.kind} {event.stage ?? ""} {event.prompt ?? ""} {String(event.data.action ?? event.data.detail ?? event.data.error ?? "")}</div>
-                  ))}
-                </div>
-              </section>
-            </aside>
           </div>
         </>
       )}

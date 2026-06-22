@@ -994,7 +994,7 @@ textarea:focus {
 .run-meta-bar strong { color: var(--text); }
 .run-detail-grid {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 330px;
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
 }
 .stage-list { display: flex; flex-direction: column; gap: 10px; }
