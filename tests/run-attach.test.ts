@@ -80,6 +80,54 @@ test("daemon run with attach sets attachMode before execution starts", async () 
   }
 });
 
+test("attach.end releases a paused run waiting for the next batch", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "apm-run-attach-test-"));
+  const socketPath = path.join(root, ".apm", "apm.sock");
+  const server = new ApmDaemonServer({
+    workspaceRoot: root,
+    socketPath,
+  });
+  await server.start();
+
+  try {
+    const now = new Date().toISOString();
+    const run: RunRecord = {
+      id: "run-attach-end-release",
+      entryName: "demo",
+      hostName: "local",
+      status: "paused",
+      createdAt: now,
+      updatedAt: now,
+      startedAt: now,
+      attachMode: true,
+      waitingForNext: true,
+      activeBatch: ["stage_b", "stage_a"],
+      variables: {},
+      promptHistory: [],
+      messageHistory: [],
+    };
+    await (server as any).store.createRun(run);
+    (server as any).hitl.setAttached(run.id, true);
+
+    let released = false;
+    const waitPromise = (server as any).hitl.waitForBatch(run.id, "stage_a,stage_b").then(() => {
+      released = true;
+    });
+    await sleep(20);
+    assert.equal(released, false);
+
+    await server.handleMethod("attach.end", { runId: run.id });
+    await waitPromise;
+
+    const updated = await (server as any).store.getRun(run.id);
+    assert.equal(updated.attachMode, false);
+    assert.equal(released, true);
+  } finally {
+    await server.stop();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("engine pauses after batch when hitl is attached", async () => {
   class FakeStore {
     public run: RunRecord;

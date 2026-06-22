@@ -732,9 +732,17 @@ export class ApmDaemonServer {
   }
 
   private async attachEnd(runId: string): Promise<{ ok: true }> {
-    await mustRun(this.store, runId);
+    const run = await mustRun(this.store, runId);
     this.hitl.setAttached(runId, false);
     await this.store.updateRun(runId, { attachMode: false });
+    if (run.waitingForNext) {
+      const batchKey = (run.activeBatch ?? []).slice().sort().join(",");
+      if (batchKey.length > 0) {
+        this.hitl.moveBatch(runId, batchKey);
+      } else {
+        this.hitl.moveNext(runId);
+      }
+    }
     return { ok: true };
   }
 
