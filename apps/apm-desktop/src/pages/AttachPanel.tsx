@@ -3,7 +3,6 @@ import type { RefObject } from "react";
 import * as api from "../lib/api";
 import type { AttachSnapshot, RunDetailResponse, WorkflowDetail } from "../lib/types";
 import { buildDisplayMessages } from "../lib/messageDisplay";
-import type { MessageLike } from "../lib/messageDisplay";
 import { MessageHistoryList } from "../components/MessageHistoryList";
 
 interface AttachPanelProps {
@@ -229,7 +228,6 @@ export function AttachPanel({ runId, autoAttach = false }: AttachPanelProps) {
   );
 }
 
-type AttachMessage = MessageLike;
 type StageItem = { name: string; status: string; prompts: string[] };
 
 function inferStageStatus(stage: string, snapshot: AttachSnapshot): string {

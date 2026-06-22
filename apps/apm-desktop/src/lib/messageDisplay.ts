@@ -71,7 +71,10 @@ function normalizeMessageRole(role: string): string {
   return value || "message";
 }
 
-function sameMessageThread(left: MessageLike, right: MessageLike): boolean {
+function sameMessageThread(
+  left: Pick<MessageLike, "stage" | "prompt">,
+  right: Pick<MessageLike, "stage" | "prompt">,
+): boolean {
   return (left.stage ?? "") === (right.stage ?? "") && (left.prompt ?? "") === (right.prompt ?? "");
 }
 

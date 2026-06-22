@@ -218,72 +218,6 @@ fn daemon_status() -> DaemonStatus {
     }
 }
 
-fn current_target_triple() -> &'static str {
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    {
-        "x86_64-unknown-linux-gnu"
-    }
-    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    {
-        "aarch64-unknown-linux-gnu"
-    }
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    {
-        "x86_64-apple-darwin"
-    }
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    {
-        "aarch64-apple-darwin"
-    }
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    {
-        "x86_64-pc-windows-msvc"
-    }
-    #[cfg(not(any(
-        all(target_os = "linux", target_arch = "x86_64"),
-        all(target_os = "linux", target_arch = "aarch64"),
-        all(target_os = "macos", target_arch = "x86_64"),
-        all(target_os = "macos", target_arch = "aarch64"),
-        all(target_os = "windows", target_arch = "x86_64")
-    )))]
-    {
-        ""
-    }
-}
-
-fn sidecar_candidates(app: &AppHandle) -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        dirs.push(resource_dir);
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            dirs.push(parent.to_path_buf());
-            dirs.push(parent.join("resources"));
-        }
-    }
-
-    let ext = std::env::consts::EXE_SUFFIX;
-    let triple = current_target_triple();
-    let names = if triple.is_empty() {
-        vec![format!("apm-daemon{}", ext)]
-    } else {
-        vec![
-            format!("apm-daemon-{}{}", triple, ext),
-            format!("apm-daemon{}", ext),
-        ]
-    };
-
-    let mut candidates = Vec::new();
-    for dir in dirs {
-        for name in &names {
-            candidates.push(dir.join("bin").join(name));
-            candidates.push(dir.join(name));
-        }
-    }
-    candidates
-}
-
 fn spawn_daemon_process(app: &AppHandle, home: &Path) -> Result<Child, String> {
     if let Ok(path) = std::env::var("APM_DAEMON_PATH") {
         let trimmed = path.trim();
@@ -321,28 +255,55 @@ fn spawn_daemon_process(app: &AppHandle, home: &Path) -> Result<Child, String> {
             .map_err(|e| format!("无法在开发模式启动 daemon: {}", e));
     }
 
-    for candidate in sidecar_candidates(app) {
-        if candidate.exists() {
-            return Command::new(&candidate)
-                .env("APM_HOME", home)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|e| format!("无法启动 sidecar daemon {}: {}", candidate.display(), e));
-        }
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("无法定位应用资源目录: {}", e))?;
+    let node_path = bundled_node_path(&resource_dir);
+    let daemon_bundle = resource_dir.join("daemon").join("apm-daemon.bundle.cjs");
+    let daemon_assets = resource_dir.join("daemon").join("assets");
+
+    if !node_path.exists() {
+        return Err(format!(
+            "内置 Node runtime 不存在: {}。请先运行桌面资源打包脚本。",
+            node_path.display()
+        ));
+    }
+    if !daemon_bundle.exists() {
+        return Err(format!(
+            "内置 daemon bundle 不存在: {}。请先运行桌面资源打包脚本。",
+            daemon_bundle.display()
+        ));
     }
 
-    Command::new("apm-daemon")
+    Command::new(&node_path)
+        .arg(&daemon_bundle)
+        .current_dir(resource_dir.join("daemon"))
         .env("APM_HOME", home)
+        .env("APM_DAEMON_RUNTIME_DIR", &daemon_assets)
+        .env("APM_SEA_RUNTIME_DIR", &daemon_assets)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| {
             format!(
-                "无法启动 apm-daemon: {}。请确认已打包 sidecar，或设置 APM_DAEMON_PATH。",
-                e
+                "无法通过内置 Node runtime 启动 daemon: {}。runtime={}, bundle={}",
+                e,
+                node_path.display(),
+                daemon_bundle.display()
             )
         })
+}
+
+fn bundled_node_path(resource_dir: &Path) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        resource_dir.join("runtime").join("node.exe")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        resource_dir.join("runtime").join("node")
+    }
 }
 
 fn write_desktop_daemon_pid(home: &Path, child: &Child) -> Result<(), String> {

@@ -32,7 +32,18 @@ export function resolvePlatformPackage(platformKey: string): string | undefined 
 
 export function bootstrapSeaRuntime(): string | undefined {
   if (bootstrapped) {
-    return process.env.APM_SEA_RUNTIME_DIR;
+    return process.env.APM_DAEMON_RUNTIME_DIR ?? process.env.APM_SEA_RUNTIME_DIR;
+  }
+
+  const packagedRuntimeDir = process.env.APM_DAEMON_RUNTIME_DIR?.trim();
+  if (packagedRuntimeDir) {
+    const runtimeDir = path.resolve(packagedRuntimeDir);
+    process.env.APM_DAEMON_RUNTIME_DIR = runtimeDir;
+    process.env.APM_SEA_RUNTIME_DIR = runtimeDir;
+    patchModuleResolution(runtimeDir);
+    appendPath(path.join(runtimeDir, "bin"));
+    bootstrapped = true;
+    return runtimeDir;
   }
 
   let isSea = false;
@@ -225,7 +236,7 @@ function appendPath(entry: string): void {
 }
 
 export function resolveSeaRuntimeDir(): string | undefined {
-  return process.env.APM_SEA_RUNTIME_DIR;
+  return process.env.APM_DAEMON_RUNTIME_DIR ?? process.env.APM_SEA_RUNTIME_DIR;
 }
 
 export function isRunningInSea(): boolean {
@@ -237,6 +248,6 @@ export function isRunningInSea(): boolean {
   }
 }
 
-if (isRunningInSea()) {
+if (process.env.APM_DAEMON_RUNTIME_DIR || isRunningInSea()) {
   bootstrapSeaRuntime();
 }

@@ -7,7 +7,12 @@ dist/
 .env.*
 !.env.example
 .apm/
+.cache/
 apps/apm-desktop/src-tauri/target/
 apps/apm-desktop/src-tauri/bin/
+apps/apm-desktop/src-tauri/resources/runtime/*
+!apps/apm-desktop/src-tauri/resources/runtime/.gitkeep
+apps/apm-desktop/src-tauri/resources/daemon/*
+!apps/apm-desktop/src-tauri/resources/daemon/.gitkeep
 apps/apm-desktop/src-tauri/gen/
 apps/apm-desktop/dist/

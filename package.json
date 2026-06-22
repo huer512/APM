@@ -16,6 +16,7 @@
     "build:assets": "node scripts/collect-native-assets.mjs",
     "build:bundle": "node scripts/bundle-esbuild.mjs",
     "build:sea": "node scripts/build-sea.mjs --targets=current",
+    "build:desktop-resources": "npm run build:js && npm run build:assets && npm run build:bundle && node scripts/package-node-runtime.mjs && node scripts/package-daemon-resources.mjs",
     "build:bin": "npm run build:js && npm run build:assets && npm run build:bundle && npm run build:sea",
     "build:bin:linux": "npm run build:js && npm run build:assets && npm run build:bundle && node scripts/build-sea.mjs --targets=linux-x64,linux-arm64",
     "build:bin:mac": "npm run build:js && npm run build:assets && npm run build:bundle && node scripts/build-sea.mjs --targets=darwin-x64,darwin-arm64",
@@ -28,7 +29,7 @@
     "dev:cli": "tsx src/bin/apm.ts",
     "desktop:install": "npm install --workspace=apm-desktop",
     "desktop:dev": "npm run tauri:dev --workspace=apm-desktop",
-    "desktop:build": "npm run tauri:build --workspace=apm-desktop",
+    "desktop:build": "npm run build:desktop-resources && node scripts/tauri-build-platform.mjs",
     "desktop:vite": "npm run build --workspace=apm-desktop",
     "test": "tsx --test tests/*.test.ts"
   },
