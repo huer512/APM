@@ -17,14 +17,11 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   const [selectedStage, setSelectedStage] = useState("");
   const [selectedPrompt, setSelectedPrompt] = useState("");
   const [message, setMessage] = useState("");
-  const [toolOnly, setToolOnly] = useState(false);
   const [status, setStatus] = useState("");
   const [collapsedToolGroups, setCollapsedToolGroups] = useState<Record<string, boolean>>({});
   const [autoAttachStarted, setAutoAttachStarted] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
-  const eventListRef = useRef<HTMLDivElement | null>(null);
   const [messagePinned, setMessagePinned] = useState(true);
-  const [eventsPinned, setEventsPinned] = useState(true);
 
   const load = async () => {
     const [snap, runDetail] = await Promise.all([
@@ -77,7 +74,6 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   }, [snapshot?.run.attachMode, snapshot?.run.id, autoAttachStarted, runId]);
 
   usePinnedScroll(messageListRef, messagePinned, [selectedStage, selectedPrompt, snapshot?.messageHistoryByStagePrompt]);
-  usePinnedScroll(eventListRef, eventsPinned, [toolOnly, snapshot?.recentEvents.length]);
 
   const endAttach = async () => {
     await api.attachEnd(runId);
@@ -111,9 +107,6 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   const msgKey = selectedStage && selectedPrompt ? `${selectedStage}.${selectedPrompt}` : "";
   const messages = msgKey ? (snapshot.messageHistoryByStagePrompt[msgKey] ?? []) : [];
   const displayMessages = buildDisplayMessages(messages);
-  const recentEvents = toolOnly
-    ? snapshot.recentEvents.filter((e) => e.kind === "tool")
-    : snapshot.recentEvents;
   const attached = snapshot.run.attachMode;
 
   return (
@@ -144,13 +137,6 @@ export function AttachPanel({ runId }: AttachPanelProps) {
           <button type="button" className="primary" onClick={() => void nextStage()}>
             下一阶段 (:next)
           </button>
-          <label className="attach-switch">
-            <span>仅 Tool 事件</span>
-            <span className="switch">
-              <input type="checkbox" checked={toolOnly} onChange={(e) => setToolOnly(e.target.checked)} />
-              <span />
-            </span>
-          </label>
         </div>
         {status && <div className="attach-status">{status}</div>}
       </section>
@@ -244,25 +230,6 @@ export function AttachPanel({ runId }: AttachPanelProps) {
         </section>
       </div>
 
-      <section className="panel attach-events-card">
-        <div className="section-head">
-          <h2>最近事件</h2>
-          <span className="muted">{toolOnly ? "Tool only" : "All events"}</span>
-        </div>
-        <div
-          className="attach-event-list"
-          ref={eventListRef}
-          onScroll={() => setEventsPinned(isNearBottom(eventListRef.current))}
-        >
-          {recentEvents.slice(-25).map((ev) => (
-            <div key={ev.seq} className={ev.level}>
-              <span>{ev.kind}</span>
-              <code>{JSON.stringify(ev.data)}</code>
-            </div>
-          ))}
-          {recentEvents.length === 0 && <div className="empty-state">暂无事件</div>}
-        </div>
-      </section>
     </div>
   );
 }

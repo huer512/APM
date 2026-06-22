@@ -1968,8 +1968,7 @@ textarea:focus {
   color: #a8ceff;
 }
 .attach-nav-card,
-.attach-message-card,
-.attach-events-card {
+.attach-message-card {
   box-shadow: none;
 }
 .attach-nav-card {
@@ -2160,38 +2159,6 @@ textarea:focus {
 .attach-composer input {
   width: 100%;
   min-height: 42px;
-}
-.attach-event-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 360px;
-  overflow: auto;
-}
-.attach-event-list div {
-  display: grid;
-  grid-template-columns: 90px minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
-  padding: 9px 11px;
-  background: rgba(7, 16, 24, 0.58);
-}
-.attach-event-list div.error {
-  border-color: rgba(255, 90, 82, 0.36);
-}
-.attach-event-list div.warn {
-  border-color: rgba(255, 173, 47, 0.34);
-}
-.attach-event-list span {
-  color: #9fc8ff;
-  font-weight: 800;
-}
-.attach-event-list code {
-  color: #c7d6e6;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 .form-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .form-row label { color: var(--text-muted); }
