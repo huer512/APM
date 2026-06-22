@@ -15,6 +15,7 @@ export function RunDetail() {
   const tab = searchParams.get("tab") === "attach" ? "attach" : "overview";
   const { daemonStatus } = useApp();
   const [detail, setDetail] = useState<RunDetailResponse | null>(null);
+  const [selectedStage, setSelectedStage] = useState("");
 
   const load = async () => {
     if (!runId) {
@@ -43,7 +44,33 @@ export function RunDetail() {
   }, [daemonStatus?.httpReachable, runId]);
 
   const run = detail?.run;
-  const latestMessages = useMemo(() => buildDisplayMessages(detail?.messages ?? []).slice(-12), [detail?.messages]);
+  useEffect(() => {
+    if (!detail) {
+      return;
+    }
+    const stageNames = detail.stages.map((stage) => stage.name);
+    if (selectedStage && stageNames.includes(selectedStage)) {
+      return;
+    }
+    const preferred = run?.currentStage && stageNames.includes(run.currentStage)
+      ? run.currentStage
+      : (stageNames[0] ?? "");
+    setSelectedStage(preferred);
+  }, [detail, run?.currentStage, selectedStage]);
+
+  const scopedMessages = useMemo(
+    () => (detail?.messages ?? []).filter((message) => !selectedStage || message.stage === selectedStage),
+    [detail?.messages, selectedStage],
+  );
+  const scopedTools = useMemo(
+    () => (detail?.tools ?? []).filter((event) => !selectedStage || event.stage === selectedStage),
+    [detail?.tools, selectedStage],
+  );
+  const scopedEvents = useMemo(
+    () => (detail?.events ?? []).filter((event) => !selectedStage || event.stage === selectedStage),
+    [detail?.events, selectedStage],
+  );
+  const latestMessages = useMemo(() => buildDisplayMessages(scopedMessages).slice(-12), [scopedMessages]);
 
   const stop = async () => {
     if (!runId) {
@@ -104,19 +131,30 @@ export function RunDetail() {
           )}
           <div className="run-detail-grid">
             <section className="panel">
-              <h2>阶段与 Agent</h2>
+              <div className="section-head">
+                <h2>阶段与 Agent</h2>
+                <span className="muted">{selectedStage || "全部阶段"}</span>
+              </div>
               <div className="stage-list">
                 {detail.stages.map((stage) => (
-                  <div key={stage.name} className={run?.currentStage === stage.name ? "active" : ""}>
+                  <button
+                    key={stage.name}
+                    type="button"
+                    className={`${selectedStage === stage.name ? "selected" : ""} ${run?.currentStage === stage.name ? "active" : ""}`}
+                    onClick={() => setSelectedStage(stage.name)}
+                  >
                     <strong>{stage.name}</strong>
                     <span>{stage.status}</span>
                     <small>{stage.prompts.join(", ") || "暂无 Agent"}</small>
-                  </div>
+                  </button>
                 ))}
               </div>
             </section>
             <section className="panel">
-              <h2>消息</h2>
+              <div className="section-head">
+                <h2>消息</h2>
+                <span className="muted">{scopedMessages.length} 条原始消息</span>
+              </div>
               <div className="message-list">
                 {latestMessages.map((item, index) => (
                   item.type === "tool-group" ? (
@@ -141,9 +179,9 @@ export function RunDetail() {
             </section>
             <aside className="side-stack">
               <section className="panel">
-                <h2>工具调用 ({detail.tools.length})</h2>
+                <h2>工具调用 ({scopedTools.length})</h2>
                 <div className="event-list">
-                  {detail.tools.slice(-8).map((event) => (
+                  {scopedTools.slice(-8).map((event) => (
                     <div key={event.seq}>
                       <strong>{String(event.data.name ?? event.kind)}</strong>
                       <span>{String(event.data.status ?? event.level)}</span>
@@ -154,7 +192,7 @@ export function RunDetail() {
               <section className="panel">
                 <h2>实时日志</h2>
                 <div className="log-view">
-                  {detail.events.slice(-30).map((event) => (
+                  {scopedEvents.slice(-30).map((event) => (
                     <div key={event.seq}>#{event.seq} [{event.level}] {event.kind} {event.stage ?? ""} {event.prompt ?? ""} {String(event.data.action ?? event.data.detail ?? event.data.error ?? "")}</div>
                   ))}
                 </div>
