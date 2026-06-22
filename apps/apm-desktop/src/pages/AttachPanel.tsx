@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import * as api from "../lib/api";
 import type { AttachSnapshot, RunDetailResponse, WorkflowDetail } from "../lib/types";
-import { MarkdownContent } from "../components/MarkdownContent";
 import { buildDisplayMessages } from "../lib/messageDisplay";
-import type { MessageLike, ToolDisplayGroup } from "../lib/messageDisplay";
+import type { MessageLike } from "../lib/messageDisplay";
+import { MessageHistoryList } from "../components/MessageHistoryList";
 
 interface AttachPanelProps {
   runId: string;
@@ -18,7 +18,6 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   const [selectedPrompt, setSelectedPrompt] = useState("");
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("");
-  const [collapsedToolGroups, setCollapsedToolGroups] = useState<Record<string, boolean>>({});
   const [autoAttachStarted, setAutoAttachStarted] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const [messagePinned, setMessagePinned] = useState(true);
@@ -187,31 +186,13 @@ export function AttachPanel({ runId }: AttachPanelProps) {
             <h2>消息历史</h2>
             <span className="muted">{displayMessages.length} 组 / 原始 {messages.length} 条</span>
           </div>
-          <div
+          <MessageHistoryList
+            messages={displayMessages}
+            selectedPrompt={selectedPrompt}
             className="attach-message-list"
-            ref={messageListRef}
+            listRef={messageListRef}
             onScroll={() => setMessagePinned(isNearBottom(messageListRef.current))}
-          >
-            {displayMessages.slice(-12).map((item, i) => (
-              item.type === "tool-group" ? (
-                <ToolMessageGroup
-                  key={item.id}
-                  item={item}
-                  collapsed={collapsedToolGroups[item.id] ?? true}
-                  onToggle={() => setCollapsedToolGroups((current) => ({ ...current, [item.id]: !(current[item.id] ?? true) }))}
-                />
-              ) : (
-                <article key={`${item.createdAt}-${i}`} className={item.role}>
-                  <header>
-                  <strong>{item.role}</strong>
-                  <span>{selectedPrompt || "-"}{item.count > 1 ? ` · 合并 ${item.count}` : ""}</span>
-                </header>
-                  <MarkdownContent content={item.content} className="attach-markdown" />
-                </article>
-              )
-            ))}
-            {displayMessages.length === 0 && <div className="empty-state">暂无消息</div>}
-          </div>
+          />
           <div className="attach-composer">
             <input
               placeholder={`向 ${selectedPrompt || "prompt"} 发送消息`}
@@ -236,58 +217,6 @@ export function AttachPanel({ runId }: AttachPanelProps) {
 
 type AttachMessage = MessageLike;
 type StageItem = { name: string; status: string; prompts: string[] };
-
-function ToolMessageGroup({
-  item,
-  collapsed,
-  onToggle,
-}: {
-  item: ToolDisplayGroup;
-  collapsed: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <article className="tool-group">
-      <header>
-        <div>
-          <strong>工具调用</strong>
-          <span>{item.items.length} 次连续调用</span>
-        </div>
-        <button type="button" onClick={onToggle}>
-          {collapsed ? "展开" : "收起"}
-        </button>
-      </header>
-      {!collapsed && (
-        <div className="tool-call-list">
-          {item.items.map((message, index) => {
-            const parsed = parseToolMessage(message.content);
-            return (
-              <div className="tool-call-card" key={`${message.createdAt}-${index}`}>
-                <div>
-                  <strong>{parsed.name}</strong>
-                  <span>{parsed.status}</span>
-                </div>
-                <code>{parsed.detail}</code>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </article>
-  );
-}
-
-function parseToolMessage(content: string): { name: string; status: string; detail: string } {
-  const match = content.match(/^\[tool:([^\]]+)\]\s+([^\s]+)\s*([\s\S]*)$/);
-  if (!match) {
-    return { name: "tool", status: "event", detail: content };
-  }
-  return {
-    name: match[1],
-    status: match[2],
-    detail: match[3] || "-",
-  };
-}
 
 function inferStageStatus(stage: string, snapshot: AttachSnapshot): string {
   if (snapshot.run.activeBatch.includes(stage) || snapshot.run.currentStage === stage) {

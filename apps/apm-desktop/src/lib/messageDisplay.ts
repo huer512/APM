@@ -44,7 +44,7 @@ export function buildDisplayMessages(messages: MessageLike[]): DisplayMessage[] 
       continue;
     }
     if (last?.type === "message" && last.role === role && sameMessageThread(last, normalizedMessage)) {
-      last.content = mergeStreamingText(last.content, content);
+      last.content = mergeStreamingText(last.content, content, role);
       last.createdAt = message.createdAt;
       last.count += 1;
       continue;
@@ -75,9 +75,9 @@ function sameMessageThread(left: MessageLike, right: MessageLike): boolean {
   return (left.stage ?? "") === (right.stage ?? "") && (left.prompt ?? "") === (right.prompt ?? "");
 }
 
-function mergeStreamingText(left: string, right: string): string {
-  const current = left.trimEnd();
-  const next = right.trim();
+function mergeStreamingText(left: string, right: string, role: string): string {
+  const current = normalizeMergedText(left, role);
+  const next = normalizeMergedText(right, role);
   if (!current) {
     return next;
   }
@@ -91,7 +91,15 @@ function mergeStreamingText(left: string, right: string): string {
   if (overlap > 0) {
     return `${current}${next.slice(overlap)}`;
   }
-  return `${current}\n\n${next}`;
+  return role === "thinking" ? `${current}${next}` : `${current}\n\n${next}`;
+}
+
+function normalizeMergedText(value: string, role: string): string {
+  const trimmed = value.trim();
+  if (role !== "thinking") {
+    return trimmed;
+  }
+  return trimmed.replace(/\s*[\r\n]+\s*/g, "");
 }
 
 function findOverlap(left: string, right: string): number {

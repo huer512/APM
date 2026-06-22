@@ -5,8 +5,8 @@ import { useApp } from "../context/AppContext";
 import type { RunDetailResponse } from "../lib/types";
 import { AttachPanel } from "./AttachPanel";
 import { PageHeader, StatusBadge, formatDate, formatDuration } from "../components/UI";
-import { MarkdownContent } from "../components/MarkdownContent";
 import { buildDisplayMessages } from "../lib/messageDisplay";
+import { MessageHistoryList } from "../components/MessageHistoryList";
 
 export function RunDetail() {
   const { runId = "" } = useParams();
@@ -147,27 +147,7 @@ export function RunDetail() {
                 <h2>消息</h2>
                 <span className="muted">{scopedMessages.length} 条原始消息</span>
               </div>
-              <div className="message-list">
-                {latestMessages.map((item, index) => (
-                  item.type === "tool-group" ? (
-                    <article key={item.id} className="tool-group">
-                      <header>
-                        <strong>{item.prompt ?? "tool"}</strong>
-                        <span>工具调用 · 合并 {item.items.length} · {formatDate(item.createdAt)}</span>
-                      </header>
-                      <p>{item.items.map((message) => message.content).join("\n")}</p>
-                    </article>
-                  ) : (
-                    <article key={`${item.createdAt}-${index}`} className={item.role}>
-                      <header>
-                        <strong>{item.prompt ?? "-"}</strong>
-                        <span>{item.role} · {formatDate(item.createdAt)}{item.count > 1 ? ` · 合并 ${item.count}` : ""}</span>
-                      </header>
-                      <MarkdownContent content={item.content} className="message-markdown" />
-                    </article>
-                  )
-                ))}
-              </div>
+              <MessageHistoryList messages={latestMessages} className="run-message-list" />
             </section>
           </div>
         </>
