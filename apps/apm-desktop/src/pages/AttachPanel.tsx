@@ -19,8 +19,8 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   const [message, setMessage] = useState("");
   const [toolOnly, setToolOnly] = useState(false);
   const [status, setStatus] = useState("");
-  const [attached, setAttached] = useState(false);
   const [collapsedToolGroups, setCollapsedToolGroups] = useState<Record<string, boolean>>({});
+  const [autoAttachStarted, setAutoAttachStarted] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const eventListRef = useRef<HTMLDivElement | null>(null);
   const [messagePinned, setMessagePinned] = useState(true);
@@ -57,19 +57,33 @@ export function AttachPanel({ runId }: AttachPanelProps) {
     return () => clearInterval(timer);
   }, [runId, selectedStage, selectedPrompt]);
 
+  useEffect(() => {
+    setAutoAttachStarted(false);
+  }, [runId]);
+
+  useEffect(() => {
+    if (!snapshot || snapshot.run.id !== runId || snapshot.run.attachMode || autoAttachStarted) {
+      return;
+    }
+    setAutoAttachStarted(true);
+    void api.attachBegin(runId)
+      .then(async () => {
+        setStatus("已自动进入接管模式");
+        await load();
+      })
+      .catch((error: unknown) => {
+        setStatus(error instanceof Error ? error.message : "自动接管失败");
+      });
+  }, [snapshot?.run.attachMode, snapshot?.run.id, autoAttachStarted, runId]);
+
   usePinnedScroll(messageListRef, messagePinned, [selectedStage, selectedPrompt, snapshot?.messageHistoryByStagePrompt]);
   usePinnedScroll(eventListRef, eventsPinned, [toolOnly, snapshot?.recentEvents.length]);
 
-  const beginAttach = async () => {
-    await api.attachBegin(runId);
-    setAttached(true);
-    setStatus("已进入接管模式");
-  };
-
   const endAttach = async () => {
     await api.attachEnd(runId);
-    setAttached(false);
+    setAutoAttachStarted(true);
     setStatus("已退出接管模式");
+    await load();
   };
 
   const sendMessage = async () => {
@@ -100,6 +114,7 @@ export function AttachPanel({ runId }: AttachPanelProps) {
   const recentEvents = toolOnly
     ? snapshot.recentEvents.filter((e) => e.kind === "tool")
     : snapshot.recentEvents;
+  const attached = snapshot.run.attachMode;
 
   return (
     <div className="attach-panel">
@@ -123,15 +138,9 @@ export function AttachPanel({ runId }: AttachPanelProps) {
           </div>
         </div>
         <div className="attach-actions">
-          {!attached ? (
-            <button type="button" className="primary" onClick={() => void beginAttach()}>
-              开始接管
-            </button>
-          ) : (
-            <button type="button" onClick={() => void endAttach()}>
-              结束接管
-            </button>
-          )}
+          <button type="button" onClick={() => void endAttach()} disabled={!attached}>
+            退出接管
+          </button>
           <button type="button" className="primary" onClick={() => void nextStage()}>
             下一阶段 (:next)
           </button>
