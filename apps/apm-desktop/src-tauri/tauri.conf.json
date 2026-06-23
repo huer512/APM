@@ -26,6 +26,12 @@
   "bundle": {
     "active": true,
     "targets": ["dmg", "nsis", "deb", "rpm"],
+    "publisher": "APM",
+    "homepage": "https://github.com/huer512/APM",
+    "copyright": "Copyright (c) 2026 APM contributors",
+    "category": "DeveloperTool",
+    "shortDescription": "Desktop control plane for APM agent workflows.",
+    "longDescription": "APM Desktop installs a private Node.js runtime and manages the bundled APM daemon as an internal desktop component. It provides workflow execution, instance monitoring, configuration management, log inspection, and human-in-the-loop controls without requiring users to install Node.js separately.",
     "resources": {
       "resources/runtime": "runtime",
       "resources/daemon": "daemon",
@@ -37,7 +43,62 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "headerImage": "packaging/windows/nsis-header.bmp",
+        "sidebarImage": "packaging/windows/nsis-sidebar.bmp",
+        "installMode": "both",
+        "languages": ["English", "SimpChinese"],
+        "displayLanguageSelector": false,
+        "compression": "lzma",
+        "startMenuFolder": "APM"
+      }
+    },
+    "linux": {
+      "deb": {
+        "section": "devel",
+        "priority": "optional",
+        "provides": ["apm-desktop"],
+        "files": {
+          "/usr/share/doc/apm-desktop/README.md": "../../../README.md",
+          "/usr/share/doc/apm-desktop/APM_DESKTOP_PRODUCT_OVERVIEW.md": "../../../APM_DESKTOP_PRODUCT_OVERVIEW.md"
+        },
+        "changelog": "packaging/debian/changelog"
+      },
+      "rpm": {
+        "release": "1",
+        "provides": ["apm-desktop"],
+        "files": {
+          "/usr/share/doc/apm-desktop/README.md": "../../../README.md",
+          "/usr/share/doc/apm-desktop/APM_DESKTOP_PRODUCT_OVERVIEW.md": "../../../APM_DESKTOP_PRODUCT_OVERVIEW.md"
+        }
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "dmg": {
+        "background": "packaging/macos/dmg-background.png",
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 180,
+          "y": 170
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 170
+        }
+      }
+    }
   },
   "plugins": {}
 }

@@ -1,0 +1,7 @@
+apm-desktop (0.1.0) unstable; urgency=medium
+
+  * Bundle a private Node.js runtime for the desktop-managed daemon.
+  * Include daemon native assets as Tauri resources.
+  * Add installer metadata, package documentation, and desktop installer artwork.
+
+ -- APM Team <apm@example.invalid>  Tue, 23 Jun 2026 09:40:00 +0800
