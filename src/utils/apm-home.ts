@@ -13,6 +13,12 @@ export interface ApmHttpConfig {
 export interface ApmLogsConfig {
   retentionDays?: number;
   defaultLimit?: number;
+  collectDebug?: boolean;
+  collectThinking?: boolean;
+  collectToolDetails?: boolean;
+  collectStageBody?: boolean;
+  collectPromptOutput?: boolean;
+  collectMessages?: boolean;
 }
 
 export interface ApmConfigFile {
@@ -149,6 +155,12 @@ export function defaultLogsConfig(): Required<ApmLogsConfig> {
   return {
     retentionDays: 30,
     defaultLimit: 200,
+    collectDebug: false,
+    collectThinking: false,
+    collectToolDetails: true,
+    collectStageBody: false,
+    collectPromptOutput: true,
+    collectMessages: true,
   };
 }
 
@@ -178,5 +190,11 @@ function normalizeLogsConfig(logs: ApmLogsConfig | undefined): ApmLogsConfig {
       typeof logs?.defaultLimit === "number" && Number.isFinite(logs.defaultLimit) && logs.defaultLimit > 0
         ? Math.floor(logs.defaultLimit)
         : defaults.defaultLimit,
+    collectDebug: logs?.collectDebug === true,
+    collectThinking: logs?.collectThinking === true,
+    collectToolDetails: logs?.collectToolDetails !== false,
+    collectStageBody: logs?.collectStageBody === true,
+    collectPromptOutput: logs?.collectPromptOutput !== false,
+    collectMessages: logs?.collectMessages !== false,
   };
 }

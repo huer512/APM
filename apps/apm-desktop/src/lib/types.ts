@@ -51,6 +51,12 @@ export interface ConfigResponse {
   logs?: {
     retentionDays?: number;
     defaultLimit?: number;
+    collectDebug?: boolean;
+    collectThinking?: boolean;
+    collectToolDetails?: boolean;
+    collectStageBody?: boolean;
+    collectPromptOutput?: boolean;
+    collectMessages?: boolean;
   };
   apmHome: string;
   httpBaseUrl?: string;

@@ -190,7 +190,16 @@ export async function fetchConfig(): Promise<ConfigResponse> {
 export async function updateConfig(patch: {
   cursorApiKey?: string;
   http?: { enabled?: boolean; host?: string; port?: number };
-  logs?: { retentionDays?: number; defaultLimit?: number };
+  logs?: {
+    retentionDays?: number;
+    defaultLimit?: number;
+    collectDebug?: boolean;
+    collectThinking?: boolean;
+    collectToolDetails?: boolean;
+    collectStageBody?: boolean;
+    collectPromptOutput?: boolean;
+    collectMessages?: boolean;
+  };
 }): Promise<ConfigResponse> {
   return apiFetch("/config", { method: "PUT", body: JSON.stringify(patch) });
 }

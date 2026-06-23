@@ -5,6 +5,7 @@ import { formatEvents } from "../logging/format-events.js";
 import type { ApmEvent, ApmEventInput } from "../types/events.js";
 import { APM_EVENT_SCHEMA_VERSION } from "../types/events.js";
 import type { RunRecord, RunStatus } from "../types.js";
+import { loadApmConfig } from "../utils/apm-home.js";
 
 interface RunStorePayload {
   runs: RunRecord[];
@@ -106,21 +107,25 @@ export class RunStore {
     });
   }
 
-  public async appendEvent(runId: string, input: ApmEventInput): Promise<ApmEvent> {
+  public async appendEvent(runId: string, input: ApmEventInput): Promise<ApmEvent | undefined> {
     await this.init();
+    const filteredInput = await this.applyLogCollectionConfig(input);
+    if (!filteredInput) {
+      return undefined;
+    }
     const seq = (this.seqCache.get(runId) ?? (await this.getEventCount(runId))) + 1;
     const event: ApmEvent = {
       v: APM_EVENT_SCHEMA_VERSION,
       seq,
-      ts: input.ts ?? new Date().toISOString(),
-      runId: input.runId,
-      level: input.level,
-      kind: input.kind,
-      stage: input.stage,
-      prompt: input.prompt,
-      sessionKey: input.sessionKey,
-      sdkRunId: input.sdkRunId,
-      data: input.data,
+      ts: filteredInput.ts ?? new Date().toISOString(),
+      runId: filteredInput.runId,
+      level: filteredInput.level,
+      kind: filteredInput.kind,
+      stage: filteredInput.stage,
+      prompt: filteredInput.prompt,
+      sessionKey: filteredInput.sessionKey,
+      sdkRunId: filteredInput.sdkRunId,
+      data: filteredInput.data,
     };
     const file = this.eventPath(runId);
     await fs.appendFile(file, `${JSON.stringify(event)}\n`, "utf8");
@@ -236,6 +241,35 @@ export class RunStore {
 
   private eventPath(runId: string): string {
     return path.join(this.eventsDir, `${runId}.jsonl`);
+  }
+
+  private async applyLogCollectionConfig(input: ApmEventInput): Promise<ApmEventInput | undefined> {
+    const config = await loadApmConfig(path.dirname(this.rootDir));
+    const logs = config.logs;
+    const action = typeof input.data.action === "string" ? input.data.action : undefined;
+
+    if (input.kind === "thinking" && logs?.collectThinking === false) {
+      return undefined;
+    }
+    if (input.kind === "stage" && action === "body" && logs?.collectStageBody === false) {
+      return undefined;
+    }
+    if (input.kind === "message" && logs?.collectMessages === false) {
+      return undefined;
+    }
+    if (input.level === "debug" && input.kind !== "thinking" && logs?.collectDebug === false) {
+      return undefined;
+    }
+    if (input.kind === "tool" && logs?.collectToolDetails === false) {
+      const { args: _args, result: _result, ...rest } = input.data;
+      return { ...input, data: rest };
+    }
+    if (input.kind === "prompt" && action === "completed" && logs?.collectPromptOutput === false) {
+      const { output: _output, ...rest } = input.data;
+      return { ...input, data: rest };
+    }
+
+    return input;
   }
 
   private async listEventRunIds(): Promise<string[]> {

@@ -15,6 +15,8 @@ test("RunStore appendEvent assigns monotonic seq", async () => {
   const first = await store.appendEvent("run1", baseEvent({ kind: "run", data: { action: "start" } }));
   const second = await store.appendEvent("run1", baseEvent({ kind: "stage", stage: "a", data: { action: "enter" } }));
 
+  assert.ok(first);
+  assert.ok(second);
   assert.equal(first.seq, 1);
   assert.equal(second.seq, 2);
 
@@ -39,6 +41,70 @@ test("RunStore readEvents supports fromSeq and kind filter", async () => {
   const tools = await store.readEvents("run1", 0, undefined, "tool");
   assert.equal(tools.length, 1);
   assert.equal(tools[0]?.kind, "tool");
+});
+
+test("RunStore applies default log collection filters", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "apm-event-store-"));
+  const store = new RunStore(path.join(root, "state"));
+  await store.init();
+
+  const thinking = await store.appendEvent("run1", baseEvent({
+    kind: "thinking",
+    prompt: "branch_a",
+    data: { text: "internal reasoning" },
+  }));
+  const stageBody = await store.appendEvent("run1", baseEvent({
+    kind: "stage",
+    stage: "a",
+    data: { action: "body", body: "large stage markdown" },
+  }));
+  const debug = await store.appendEvent("run1", baseEvent({
+    level: "debug",
+    kind: "run",
+    data: { action: "debug", detail: "verbose" },
+  }));
+  const info = await store.appendEvent("run1", baseEvent({
+    kind: "run",
+    data: { action: "start" },
+  }));
+
+  assert.equal(thinking, undefined);
+  assert.equal(stageBody, undefined);
+  assert.equal(debug, undefined);
+  assert.ok(info);
+
+  const all = await store.readEvents("run1", 0);
+  assert.equal(all.length, 1);
+  assert.equal(all[0]?.kind, "run");
+});
+
+test("RunStore can strip tool details when configured", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "apm-event-store-"));
+  await fs.writeFile(path.join(root, "config.json"), JSON.stringify({
+    logs: {
+      collectToolDetails: false,
+    },
+  }), "utf8");
+  const store = new RunStore(path.join(root, "state"));
+  await store.init();
+
+  const event = await store.appendEvent("run1", baseEvent({
+    kind: "tool",
+    data: {
+      name: "read",
+      status: "completed",
+      args: { path: "secret.txt" },
+      result: "secret content",
+      elapsedMs: 12,
+    },
+  }));
+
+  assert.ok(event);
+  assert.deepEqual(event.data, {
+    name: "read",
+    status: "completed",
+    elapsedMs: 12,
+  });
 });
 
 test("formatEvents renders tool and stage lines", async () => {

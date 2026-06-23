@@ -284,12 +284,20 @@ export class WorkflowEngine {
   ): AgentRunCallbacks {
     return {
       onSdkEvent: async (input) => {
-        const event = await this.emit(runId, {
+        const recordedEvent = await this.emit(runId, {
           ...input,
           stage: stageName,
           prompt: promptName,
           sessionKey,
         });
+        const event = recordedEvent ?? {
+          ...input,
+          runId,
+          stage: stageName,
+          prompt: promptName,
+          sessionKey,
+          ts: input.ts ?? new Date().toISOString(),
+        };
         if (event.kind === "tool") {
           const status = String(event.data.status ?? "");
           if (status === "completed" || status === "error") {

@@ -91,7 +91,7 @@ export function formatEvents(events: ApmEvent[]): string {
   return events.map(formatEvent).join("\n");
 }
 
-export function formatToolMessageSummary(event: ApmEvent): string {
+export function formatToolMessageSummary(event: Pick<ApmEvent, "data">): string {
   const name = String(event.data.name ?? "tool");
   const status = String(event.data.status ?? "unknown");
   if (status === "running") {

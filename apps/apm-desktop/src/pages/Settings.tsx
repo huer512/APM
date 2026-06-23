@@ -12,6 +12,12 @@ export function Settings() {
   const [httpPort, setHttpPort] = useState(19740);
   const [logRetentionDays, setLogRetentionDays] = useState(30);
   const [logDefaultLimit, setLogDefaultLimit] = useState(200);
+  const [collectDebug, setCollectDebug] = useState(false);
+  const [collectThinking, setCollectThinking] = useState(false);
+  const [collectToolDetails, setCollectToolDetails] = useState(true);
+  const [collectStageBody, setCollectStageBody] = useState(false);
+  const [collectPromptOutput, setCollectPromptOutput] = useState(true);
+  const [collectMessages, setCollectMessages] = useState(true);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -22,6 +28,12 @@ export function Settings() {
       setHttpPort(config.http?.port ?? 19740);
       setLogRetentionDays(config.logs?.retentionDays ?? 30);
       setLogDefaultLimit(config.logs?.defaultLimit ?? 200);
+      setCollectDebug(config.logs?.collectDebug ?? false);
+      setCollectThinking(config.logs?.collectThinking ?? false);
+      setCollectToolDetails(config.logs?.collectToolDetails ?? true);
+      setCollectStageBody(config.logs?.collectStageBody ?? false);
+      setCollectPromptOutput(config.logs?.collectPromptOutput ?? true);
+      setCollectMessages(config.logs?.collectMessages ?? true);
     }
   }, [config]);
 
@@ -35,6 +47,12 @@ export function Settings() {
         logs: {
           retentionDays: Math.max(0, Math.floor(logRetentionDays)),
           defaultLimit: Math.max(1, Math.floor(logDefaultLimit)),
+          collectDebug,
+          collectThinking,
+          collectToolDetails,
+          collectStageBody,
+          collectPromptOutput,
+          collectMessages,
         },
       });
       setMessage("已保存。若修改了 HTTP 端口，请重启 Daemon。");
@@ -199,6 +217,74 @@ export function Settings() {
                   onChange={(event) => setLogDefaultLimit(Number(event.target.value))}
                 />
               </div>
+              <div className="setting-row">
+                <div>
+                  <strong>采集调试事件</strong>
+                  <span>记录 debug 级事件。默认关闭，避免无关调试日志进入全局事件文件。</span>
+                </div>
+                <label className="switch">
+                  <input type="checkbox" checked={collectDebug} onChange={(event) => setCollectDebug(event.target.checked)} />
+                  <span />
+                </label>
+              </div>
+              <div className="setting-row">
+                <div>
+                  <strong>采集 Thinking</strong>
+                  <span>记录模型 thinking 流式内容。默认关闭，减少大量中间过程日志。</span>
+                </div>
+                <label className="switch">
+                  <input type="checkbox" checked={collectThinking} onChange={(event) => setCollectThinking(event.target.checked)} />
+                  <span />
+                </label>
+              </div>
+              <div className="setting-row">
+                <div>
+                  <strong>采集 Stage Body</strong>
+                  <span>记录渲染后的阶段正文。默认关闭，仅排查模板问题时打开。</span>
+                </div>
+                <label className="switch">
+                  <input type="checkbox" checked={collectStageBody} onChange={(event) => setCollectStageBody(event.target.checked)} />
+                  <span />
+                </label>
+              </div>
+              <div className="setting-row">
+                <div>
+                  <strong>采集工具细节</strong>
+                  <span>保留工具调用参数和结果。关闭后只记录工具名、状态和调用 ID。</span>
+                </div>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={collectToolDetails}
+                    onChange={(event) => setCollectToolDetails(event.target.checked)}
+                  />
+                  <span />
+                </label>
+              </div>
+              <div className="setting-row">
+                <div>
+                  <strong>采集 Prompt 输出</strong>
+                  <span>在事件日志中保留 prompt 最终输出。运行详情仍会保留结果历史。</span>
+                </div>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={collectPromptOutput}
+                    onChange={(event) => setCollectPromptOutput(event.target.checked)}
+                  />
+                  <span />
+                </label>
+              </div>
+              <div className="setting-row">
+                <div>
+                  <strong>采集消息事件</strong>
+                  <span>在事件日志中保留 user/assistant 消息。接管消息历史不受影响。</span>
+                </div>
+                <label className="switch">
+                  <input type="checkbox" checked={collectMessages} onChange={(event) => setCollectMessages(event.target.checked)} />
+                  <span />
+                </label>
+              </div>
             </div>
           )}
 
@@ -217,6 +303,10 @@ export function Settings() {
               <dd>{apmHome}</dd>
               <dt>日志窗口</dt>
               <dd>{logRetentionDays > 0 ? `${logRetentionDays} 天` : "不过滤"}</dd>
+              <dt>Thinking</dt>
+              <dd>{collectThinking ? "采集" : "关闭"}</dd>
+              <dt>工具细节</dt>
+              <dd>{collectToolDetails ? "采集" : "摘要"}</dd>
               <dt>开发模式</dt>
               <dd>{context?.devMode ? "是" : "否"}</dd>
             </dl>
