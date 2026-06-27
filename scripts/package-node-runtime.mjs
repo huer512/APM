@@ -6,7 +6,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 const root = process.cwd();
-const version = (process.env.NODE_RUNTIME_VERSION ?? process.versions.node).replace(/^v/, "");
+const DEFAULT_NODE_RUNTIME_VERSION = "24.18.0";
+const version = (process.env.NODE_RUNTIME_VERSION ?? DEFAULT_NODE_RUNTIME_VERSION).replace(/^v/, "");
 const platformKey = `${process.platform}-${process.arch}`;
 const outputDir = path.join(root, "apps/apm-desktop/src-tauri/resources/runtime");
 const cacheDir = path.join(root, ".cache/node-runtime", version, platformKey);
