@@ -6,10 +6,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, State};
+use tauri::{ipc::Channel, AppHandle, Manager, State};
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 struct DaemonState {
     child: Mutex<Option<Child>>,
+}
+
+struct PendingUpdate {
+    update: Mutex<Option<Update>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -27,6 +32,25 @@ pub struct DaemonStatus {
     pub running: bool,
     pub http_reachable: bool,
     pub message: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMetadata {
+    pub current_version: String,
+    pub version: String,
+    pub date: Option<String>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(tag = "event", content = "data")]
+pub enum UpdateDownloadEvent {
+    #[serde(rename_all = "camelCase")]
+    Started { content_length: Option<u64> },
+    #[serde(rename_all = "camelCase")]
+    Progress { chunk_length: usize },
+    Finished,
 }
 
 fn apm_home_dir() -> PathBuf {
@@ -528,13 +552,78 @@ fn import_minimal_template(app: AppHandle) -> Result<String, String> {
     Ok(format!("已导入模板到 {}", home.display()))
 }
 
+fn update_metadata(update: &Update) -> UpdateMetadata {
+    UpdateMetadata {
+        current_version: update.current_version.clone(),
+        version: update.version.clone(),
+        date: update.date.map(|date| date.to_string()),
+        body: update.body.clone(),
+    }
+}
+
+#[tauri::command]
+async fn check_for_update(
+    app: AppHandle,
+    pending_update: State<'_, PendingUpdate>,
+) -> Result<Option<UpdateMetadata>, String> {
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?;
+    let metadata = update.as_ref().map(update_metadata);
+    let mut guard = pending_update.update.lock().map_err(|e| e.to_string())?;
+    *guard = update;
+    Ok(metadata)
+}
+
+#[tauri::command]
+async fn install_update(
+    pending_update: State<'_, PendingUpdate>,
+    on_event: Channel<UpdateDownloadEvent>,
+) -> Result<(), String> {
+    let update = {
+        let mut guard = pending_update.update.lock().map_err(|e| e.to_string())?;
+        guard
+            .take()
+            .ok_or_else(|| "没有可安装的待处理更新，请先检查更新。".to_string())?
+    };
+    let mut started = false;
+    update
+        .download_and_install(
+            |chunk_length, content_length| {
+                if !started {
+                    let _ = on_event.send(UpdateDownloadEvent::Started { content_length });
+                    started = true;
+                }
+                let _ = on_event.send(UpdateDownloadEvent::Progress { chunk_length });
+            },
+            || {
+                let _ = on_event.send(UpdateDownloadEvent::Finished);
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn restart_app(app: AppHandle) {
+    app.restart();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(DaemonState {
             child: Mutex::new(None),
+        })
+        .manage(PendingUpdate {
+            update: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             get_desktop_context,
@@ -548,6 +637,9 @@ pub fn run() {
             write_apm_text_file,
             rename_apm_file,
             delete_apm_file,
+            check_for_update,
+            install_update,
+            restart_app,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

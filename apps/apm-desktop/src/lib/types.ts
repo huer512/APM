@@ -177,3 +177,26 @@ export interface DaemonStatus {
   httpReachable: boolean;
   message: string;
 }
+
+export interface UpdateMetadata {
+  currentVersion: string;
+  version: string;
+  date?: string;
+  body?: string;
+}
+
+export type UpdateDownloadEvent =
+  | { event: "Started"; data: { contentLength?: number } }
+  | { event: "Progress"; data: { chunkLength: number } }
+  | { event: "Finished" };
+
+export interface UpdateState {
+  checking: boolean;
+  installing: boolean;
+  available: UpdateMetadata | null;
+  lastCheckedAt: string | null;
+  downloadedBytes: number;
+  contentLength: number | null;
+  error: string | null;
+  dismissedVersion: string | null;
+}

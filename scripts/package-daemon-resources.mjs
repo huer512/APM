@@ -10,8 +10,10 @@ const assetsDir = path.join(resourceDir, "assets");
 
 const manifestPath = path.join(bundleDir, "assets-manifest.json");
 const daemonBundlePath = path.join(bundleDir, "apm-daemon.bundle.cjs");
+const mcpBundlePath = path.join(bundleDir, "apm-mcp.bundle.cjs");
 
 await ensureFile(daemonBundlePath, "Missing daemon bundle. Run `npm run build:bundle` first.");
+await ensureFile(mcpBundlePath, "Missing MCP bundle. Run `npm run build:bundle` first.");
 await ensureFile(manifestPath, "Missing assets manifest. Run `npm run build:assets` first.");
 
 const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
@@ -19,6 +21,7 @@ const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
 await fs.rm(resourceDir, { recursive: true, force: true });
 await fs.mkdir(assetsDir, { recursive: true });
 await fs.copyFile(daemonBundlePath, path.join(resourceDir, "apm-daemon.bundle.cjs"));
+await fs.copyFile(mcpBundlePath, path.join(resourceDir, "apm-mcp.bundle.cjs"));
 await fs.copyFile(manifestPath, path.join(resourceDir, "assets-manifest.json"));
 
 for (const asset of manifest.assets ?? []) {

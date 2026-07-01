@@ -4,12 +4,13 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import * as api from "../lib/api";
 import * as desktop from "../lib/desktop";
-import type { ConfigResponse, DaemonStatus, DesktopContext } from "../lib/types";
+import type { ConfigResponse, DaemonStatus, DesktopContext, UpdateState } from "../lib/types";
 
 interface AppContextValue {
   context: DesktopContext | null;
@@ -22,6 +23,10 @@ interface AppContextValue {
   startDaemon: () => Promise<void>;
   stopDaemon: () => Promise<void>;
   restartDaemon: () => Promise<void>;
+  updateState: UpdateState;
+  checkUpdates: () => Promise<void>;
+  installAvailableUpdate: () => Promise<void>;
+  dismissUpdate: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -32,6 +37,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [daemonStatus, setDaemonStatus] = useState<DaemonStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [updateState, setUpdateState] = useState<UpdateState>({
+    checking: false,
+    installing: false,
+    available: null,
+    lastCheckedAt: null,
+    downloadedBytes: 0,
+    contentLength: null,
+    error: null,
+    dismissedVersion: null,
+  });
+  const checkedOnStartup = useRef(false);
 
   const refreshDaemon = useCallback(async () => {
     const status = await desktop.getDaemonStatus();
@@ -80,6 +96,70 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await refresh();
   }, [refresh]);
 
+  const checkUpdates = useCallback(async () => {
+    setUpdateState((current) => ({ ...current, checking: true, error: null }));
+    try {
+      const available = await desktop.checkForUpdate();
+      setUpdateState((current) => ({
+        ...current,
+        checking: false,
+        available,
+        lastCheckedAt: new Date().toISOString(),
+        downloadedBytes: 0,
+        contentLength: null,
+        error: null,
+        dismissedVersion:
+          available && current.dismissedVersion && available.version !== current.dismissedVersion
+            ? null
+            : current.dismissedVersion,
+      }));
+    } catch (err) {
+      setUpdateState((current) => ({
+        ...current,
+        checking: false,
+        lastCheckedAt: new Date().toISOString(),
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }, []);
+
+  const installAvailableUpdate = useCallback(async () => {
+    setUpdateState((current) => ({
+      ...current,
+      installing: true,
+      downloadedBytes: 0,
+      contentLength: null,
+      error: null,
+    }));
+    try {
+      await desktop.installUpdate((event) => {
+        setUpdateState((current) => {
+          if (event.event === "Started") {
+            return { ...current, contentLength: event.data.contentLength ?? null, downloadedBytes: 0 };
+          }
+          if (event.event === "Progress") {
+            return { ...current, downloadedBytes: current.downloadedBytes + event.data.chunkLength };
+          }
+          return current;
+        });
+      });
+      await desktop.restartApp();
+    } catch (err) {
+      setUpdateState((current) => ({
+        ...current,
+        installing: false,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }, []);
+
+  const dismissUpdate = useCallback(() => {
+    setUpdateState((current) => ({
+      ...current,
+      dismissedVersion: current.available?.version ?? current.dismissedVersion,
+    }));
+  }, []);
+
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => {
@@ -87,6 +167,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 5000);
     return () => clearInterval(timer);
   }, [refresh, refreshDaemon]);
+
+  useEffect(() => {
+    if (loading || checkedOnStartup.current) {
+      return;
+    }
+    checkedOnStartup.current = true;
+    void checkUpdates();
+  }, [checkUpdates, loading]);
 
   const value = useMemo(
     () => ({
@@ -100,6 +188,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       startDaemon,
       stopDaemon,
       restartDaemon,
+      updateState,
+      checkUpdates,
+      installAvailableUpdate,
+      dismissUpdate,
     }),
     [
       context,
@@ -112,6 +204,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       startDaemon,
       stopDaemon,
       restartDaemon,
+      updateState,
+      checkUpdates,
+      installAvailableUpdate,
+      dismissUpdate,
     ],
   );
 

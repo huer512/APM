@@ -9,11 +9,14 @@ import type {
   Dict,
   EntryDefinition,
   HostDefinition,
+  PromptDefinition,
   RunRecord,
+  RuntimeStagePlanNode,
   StageDefinition,
 } from "../types.js";
 import { decodeRpcLines, encodeRpc, type RpcRequest, type RpcResponse } from "./rpc.js";
-import { buildCatalog, loadEntry, loadHost, loadStage, loadWorkflowBundle } from "../config/loaders.js";
+import { buildCatalog, loadEntry, loadHost, loadPrompt, loadStage, loadWorkflowBundle } from "../config/loaders.js";
+import { APM_TOOL_OPS, isApmToolOp } from "../config/apm-tools.js";
 import { HostExecutor } from "../engine/host-executor.js";
 import { AgentRunner } from "../engine/agent-runner.js";
 import { HitlController } from "../engine/hitl-controller.js";
@@ -126,6 +129,10 @@ export class ApmDaemonServer {
     this.store = new RunStore(path.join(this.root, "state"));
     this.runner = new AgentRunner({
       apiKeyProvider: () => this.cursorApiKey,
+      apmToolContextProvider: () => ({
+        ...this.getHttpInfo(),
+        root: this.root,
+      }),
     });
     this.hitl = new HitlController();
     this.engine = new WorkflowEngine({
@@ -273,6 +280,8 @@ export class ApmDaemonServer {
         return this.stopRun(asString(params.runId, "runId"));
       case "run.retry":
         return this.retryRun(asString(params.runId, "runId"));
+      case "agent.apm":
+        return this.handleAgentApm(params);
       default:
         throw new Error(`Unknown RPC method: ${method}`);
     }
@@ -541,6 +550,7 @@ export class ApmDaemonServer {
       variables,
       promptHistory: [],
       messageHistory: [],
+      completedStages: [],
     };
     await this.store.createRun(run);
 
@@ -704,6 +714,253 @@ export class ApmDaemonServer {
     });
   }
 
+  private async handleAgentApm(params: Record<string, unknown>): Promise<unknown> {
+    const op = asString(params.op, "op");
+    if (!isApmToolOp(op)) {
+      throw new Error(`Unknown apm op: ${op}`);
+    }
+    const context = asRecord(params.context ?? {});
+    const args = asRecord(params.args ?? {});
+    const allowedOps = parseAllowedOps(context.allowedOps);
+    if (allowedOps.size > 0 && !allowedOps.has(op)) {
+      throw new Error(`Operation "${op}" is not enabled for this prompt.`);
+    }
+    const runId = typeof context.runId === "string" && context.runId.trim() ? context.runId.trim() : undefined;
+    const stage = typeof context.stage === "string" ? context.stage : undefined;
+    const prompt = typeof context.prompt === "string" ? context.prompt : undefined;
+
+    switch (op) {
+      case "help":
+      case "capabilities":
+        return {
+          ok: true,
+          tool: "apm",
+          usage: "Call apm({ op, args }) with one operation at a time.",
+          allowedOps: allowedOps.size > 0 ? [...allowedOps] : APM_TOOL_OPS,
+        };
+      case "schema.get":
+        return this.getApmToolSchema();
+      case "context.current":
+        return { ok: true, runId, stage, prompt, allowedOps: [...allowedOps] };
+      case "workflow.list":
+        return this.listWorkflows();
+      case "workflow.get":
+        return this.getWorkflow(asString(args.name ?? args.entryName, "name"));
+      case "entry.get":
+        return this.loadCatalogItem("entries", asString(args.name, "name"));
+      case "stage.get":
+        return this.loadStageForAgent(asString(args.name, "name"));
+      case "prompt.get":
+        return this.loadPromptForAgent(asString(args.name, "name"));
+      case "host.get":
+        return this.loadHostForAgent(asString(args.name, "name"));
+      case "run.list":
+        return { runs: await this.store.listRuns(args.all === true) };
+      case "run.current":
+        return { run: await mustRun(this.store, requireRunId(runId)) };
+      case "run.get":
+        return { run: await mustRun(this.store, asString(args.runId ?? runId, "runId")) };
+      case "run.events": {
+        const targetRunId = asString(args.runId ?? runId, "runId");
+        const limit = asNumber(args.limit, "limit", 80);
+        return { events: await this.store.readEventsTail(targetRunId, limit) };
+      }
+      case "run.messages": {
+        const target = await mustRun(this.store, asString(args.runId ?? runId, "runId"));
+        return { messages: filterMessages(target, args) };
+      }
+      case "run.outputs": {
+        const target = await mustRun(this.store, asString(args.runId ?? runId, "runId"));
+        return { outputs: target.promptHistory };
+      }
+      case "run.variables": {
+        const target = await mustRun(this.store, asString(args.runId ?? runId, "runId"));
+        return { variables: target.variables };
+      }
+      case "run.pause":
+        return this.attachBegin(asString(args.runId ?? runId, "runId"));
+      case "run.resume":
+        return this.attachEnd(asString(args.runId ?? runId, "runId"));
+      case "run.stop":
+        return this.stopRun(asString(args.runId ?? runId, "runId"));
+      case "run.rerun":
+        return this.retryRun(asString(args.runId ?? runId, "runId"));
+      case "run.start":
+        return this.handleRun({
+          entryName: asString(args.entryName ?? args.name, "entryName"),
+          params: asRecord(args.params ?? {}),
+          hostName: typeof args.hostName === "string" ? args.hostName : undefined,
+          attach: args.attach === true,
+        });
+      case "run.set_note":
+        return { run: await this.store.updateRun(asString(args.runId ?? runId, "runId"), { note: asString(args.note, "note") }) };
+      case "run.set_tag": {
+        const targetRunId = asString(args.runId ?? runId, "runId");
+        const target = await mustRun(this.store, targetRunId);
+        const tag = asString(args.tag, "tag");
+        const remove = args.remove === true;
+        const tags = new Set(target.tags ?? []);
+        if (remove) tags.delete(tag);
+        else tags.add(tag);
+        return { run: await this.store.updateRun(targetRunId, { tags: [...tags] }) };
+      }
+      case "stage_plan.get": {
+        const target = await mustRun(this.store, asString(args.runId ?? runId, "runId"));
+        return { stagePlan: target.stagePlan ?? {} };
+      }
+      case "stage_plan.update":
+        return this.updateStagePlan(asString(args.runId ?? runId, "runId"), args, prompt);
+      case "attach.status": {
+        const target = await mustRun(this.store, asString(args.runId ?? runId, "runId"));
+        return { attachMode: target.attachMode, waitingForNext: target.waitingForNext, activeBatch: target.activeBatch };
+      }
+      case "attach.request":
+        return this.attachBegin(asString(args.runId ?? runId, "runId"));
+      case "attach.release":
+        return this.attachEnd(asString(args.runId ?? runId, "runId"));
+      case "attach.next":
+        return this.attachNext(asString(args.runId ?? runId, "runId"));
+      case "attach.message":
+        return this.attachMessage(
+          asString(args.runId ?? runId, "runId"),
+          asString(args.prompt ?? prompt, "prompt"),
+          asString(args.message, "message"),
+        );
+      case "system.health":
+      case "daemon.status":
+        return this.getDesktopSummary();
+      case "system.limits":
+        return {
+          maxReturnedEvents: 500,
+          stagePlanUpdate: "May edit current or future runtime stages for this run only.",
+          destructiveOpsRequirePermission: ["config.apply_patch", "run.stop"],
+        };
+      case "config.validate":
+        return this.validateWorkflow(asString(args.name ?? args.entryName, "name"));
+      case "config.preview_patch":
+        return { ok: true, preview: args };
+      case "config.apply_patch":
+        return this.applyConfigContent(args);
+      case "control.confirm":
+      case "control.cancel":
+        return { ok: true, op, message: "No pending confirmation system is configured yet." };
+      case "audit.write":
+        return this.writeAgentAudit(asString(args.runId ?? runId, "runId"), op, args, prompt);
+      default:
+        throw new Error(`Unhandled apm op: ${op}`);
+    }
+  }
+
+  private getApmToolSchema(): unknown {
+    return {
+      tool: "apm",
+      input: {
+        op: "string",
+        args: "object",
+      },
+      ops: APM_TOOL_OPS,
+      stagePlanNode: {
+        prompts: "string[]",
+        nextStages: "string[]",
+        source: '"workflow" | "runtime"',
+        note: "optional string",
+      },
+    };
+  }
+
+  private async loadCatalogItem(kind: "entries" | "stages" | "prompts" | "hosts", name: string): Promise<unknown> {
+    const catalog = await buildCatalog(this.root);
+    const filePath = mustCatalog(catalog[kind], name, kind);
+    const raw = await fs.readFile(filePath, "utf8");
+    return {
+      name,
+      kind,
+      path: path.relative(this.root, filePath),
+      raw,
+    };
+  }
+
+  private async loadStageForAgent(name: string): Promise<{ stage: StageDefinition }> {
+    const catalog = await buildCatalog(this.root);
+    const filePath = mustCatalog(catalog.stages, name, "stage");
+    return { stage: await loadStage(name, filePath) };
+  }
+
+  private async loadPromptForAgent(name: string): Promise<{ prompt: PromptDefinition }> {
+    const catalog = await buildCatalog(this.root);
+    const filePath = mustCatalog(catalog.prompts, name, "prompt");
+    return { prompt: await loadPrompt(name, filePath) };
+  }
+
+  private async loadHostForAgent(name: string): Promise<{ host: HostDefinition }> {
+    const catalog = await buildCatalog(this.root);
+    const filePath = mustCatalog(catalog.hosts, name, "host");
+    return { host: await loadHost(name, filePath, this.root) };
+  }
+
+  private async updateStagePlan(runId: string, args: Record<string, unknown>, updatedBy?: string): Promise<{ run: RunRecord; changed: string[] }> {
+    const run = await mustRun(this.store, runId);
+    const nextPlan: Record<string, RuntimeStagePlanNode> = { ...(run.stagePlan ?? {}) };
+    const changed: string[] = [];
+    const updates = Array.isArray(args.stages) ? args.stages : args.stage ? [args.stage] : [];
+    if (updates.length === 0) {
+      throw new Error("stage_plan.update requires args.stage or args.stages.");
+    }
+    for (const item of updates) {
+      const update = asRecord(item);
+      const name = asString(update.name, "stage.name");
+      const existing = nextPlan[name];
+      const prompts = parseStringList(update.prompts ?? existing?.prompts ?? []);
+      const nextStages = parseStringList(update.nextStages ?? update.next ?? existing?.nextStages ?? []);
+      if (prompts.length === 0) {
+        throw new Error(`Runtime stage "${name}" must contain at least one prompt.`);
+      }
+      nextPlan[name] = {
+        prompts,
+        nextStages,
+        source: existing?.source ?? "runtime",
+        note: typeof update.note === "string" ? update.note : existing?.note,
+        updatedAt: new Date().toISOString(),
+        updatedBy,
+      };
+      changed.push(name);
+    }
+    const updated = await this.store.updateRun(runId, { stagePlan: nextPlan });
+    await this.store.appendEvent(runId, {
+      runId,
+      level: "warn",
+      kind: "run",
+      data: { action: "stage_plan.update", changed, updatedBy },
+    });
+    return { run: updated, changed };
+  }
+
+  private async applyConfigContent(args: Record<string, unknown>): Promise<{ ok: true; path: string }> {
+    const relPath = asString(args.path, "path");
+    const content = asString(args.content, "content");
+    const targetPath = path.resolve(this.root, relPath);
+    const rootWithSep = path.resolve(this.root) + path.sep;
+    if (!targetPath.startsWith(rootWithSep)) {
+      throw new Error("config.apply_patch path must stay inside APM_HOME.");
+    }
+    if (!/\.md$|config\.json$/.test(targetPath)) {
+      throw new Error("config.apply_patch only supports Markdown config files or config.json.");
+    }
+    await fs.writeFile(targetPath, content, "utf8");
+    return { ok: true, path: path.relative(this.root, targetPath) };
+  }
+
+  private async writeAgentAudit(runId: string, op: string, args: Record<string, unknown>, prompt?: string): Promise<{ ok: true }> {
+    await this.store.appendEvent(runId, {
+      runId,
+      level: "info",
+      kind: "run",
+      prompt,
+      data: { action: "agent_audit", op, args },
+    });
+    return { ok: true };
+  }
+
   private async executeRun(runId: string, entryName: string, hostName?: string): Promise<void> {
     try {
       const run = await this.store.getRun(runId);
@@ -711,7 +968,10 @@ export class ApmDaemonServer {
         throw new Error(`Run "${runId}" disappeared.`);
       }
       const bundle = await loadWorkflowBundle(this.root, entryName, { hostName });
-      await this.store.updateRun(runId, { hostName: bundle.host.name });
+      await this.store.updateRun(runId, {
+        hostName: bundle.host.name,
+        stagePlan: buildRuntimeStagePlan(bundle.stages),
+      });
       await this.store.appendEvent(runId, {
         runId,
         level: "info",
@@ -847,6 +1107,62 @@ function asNumber(value: unknown, field: string, fallback: number): number {
     }
   }
   throw new Error(`Invalid "${field}", expected number.`);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireRunId(runId: string | undefined): string {
+  if (!runId) {
+    throw new Error("Current run context is unavailable. Pass args.runId explicitly.");
+  }
+  return runId;
+}
+
+function parseAllowedOps(value: unknown): Set<string> {
+  const values = Array.isArray(value)
+    ? value.map((item) => String(item))
+    : String(value ?? "")
+        .split(",")
+        .map((item) => item.trim());
+  return new Set(values.filter(Boolean));
+}
+
+function parseStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildRuntimeStagePlan(stages: Map<string, StageDefinition>): Record<string, RuntimeStagePlanNode> {
+  return Object.fromEntries(
+    [...stages.entries()].map(([name, stage]) => [
+      name,
+      {
+        prompts: [...stage.prompts],
+        nextStages: [...stage.nextStages],
+        source: "workflow",
+      } satisfies RuntimeStagePlanNode,
+    ]),
+  );
+}
+
+function filterMessages(run: RunRecord, args: Record<string, unknown>): RunRecord["messageHistory"] {
+  const stage = typeof args.stage === "string" ? args.stage : undefined;
+  const prompt = typeof args.prompt === "string" ? args.prompt : undefined;
+  const limit = typeof args.limit === "number" && Number.isFinite(args.limit) ? args.limit : 80;
+  return run.messageHistory
+    .filter((item) => !stage || item.stage === stage)
+    .filter((item) => !prompt || item.prompt === prompt)
+    .slice(-limit);
 }
 
 function createRunId(): string {

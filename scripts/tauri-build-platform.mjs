@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 const bundlesByPlatform = {
   darwin: "dmg",
   win32: "nsis",
-  linux: "deb,rpm",
+  linux: "appimage,deb,rpm",
 };
 
 const bundles = process.env.TAURI_BUNDLES ?? bundlesByPlatform[process.platform];

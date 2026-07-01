@@ -191,6 +191,13 @@ export class ApmHttpServer {
         return;
       }
 
+      if (url.pathname === "/agent/apm" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const result = await this.daemon.handleMethod("agent.apm", body);
+        sendJson(res, 200, result);
+        return;
+      }
+
       const runMatch = url.pathname.match(/^\/runs\/([^/]+)$/);
       if (runMatch && req.method === "GET") {
         const run = await this.daemon.handleMethod("run.get", { runId: runMatch[1] });

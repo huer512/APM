@@ -35,6 +35,58 @@ const CATEGORIES: Array<{ id: Category; label: string }> = [
   { id: "entries", label: "入口" },
 ];
 
+const APM_TOOL_PRESETS = [
+  { value: "off", label: "关闭", description: "不向该提示词注入 APM 控制工具" },
+  { value: "inspect", label: "只读查看", description: "查看工作流、实例、消息和系统状态" },
+  { value: "control", label: "运行控制", description: "允许暂停、恢复、停止、接管消息等操作" },
+  { value: "orchestrate", label: "编排控制", description: "允许修改当前实例后续阶段计划" },
+  { value: "admin", label: "管理权限", description: "包含配置写入等高风险操作" },
+  { value: "custom", label: "自定义", description: "只启用下方显式列出的 op" },
+];
+
+const APM_TOOL_OPS = [
+  "help",
+  "capabilities",
+  "schema.get",
+  "context.current",
+  "workflow.list",
+  "workflow.get",
+  "entry.get",
+  "stage.get",
+  "prompt.get",
+  "host.get",
+  "run.list",
+  "run.current",
+  "run.get",
+  "run.events",
+  "run.messages",
+  "run.outputs",
+  "run.variables",
+  "run.pause",
+  "run.resume",
+  "run.stop",
+  "run.rerun",
+  "run.start",
+  "run.set_note",
+  "run.set_tag",
+  "stage_plan.get",
+  "stage_plan.update",
+  "attach.status",
+  "attach.request",
+  "attach.release",
+  "attach.next",
+  "attach.message",
+  "system.health",
+  "system.limits",
+  "daemon.status",
+  "config.validate",
+  "config.preview_patch",
+  "config.apply_patch",
+  "control.confirm",
+  "control.cancel",
+  "audit.write",
+];
+
 const EDITOR_THEME = EditorView.theme({
   "&": {
     minHeight: "100%",
@@ -732,6 +784,13 @@ function PromptVisualEditor({ doc, onChange }: { doc: PromptDoc; onChange: (data
                 <span />
               </label>
             </div>
+            <ConfigField label="APM 工具" hint="开启后会向该 Prompt 注入单个 apm({op,args}) 工具，用于查看或控制当前工作流实例。">
+              <CustomSelectBox
+                value={doc.apmTools}
+                options={APM_TOOL_PRESETS}
+                onChange={(apmTools) => onChange({ ...doc, apmTools })}
+              />
+            </ConfigField>
           </div>
           <ConfigField label="自定义字段" hint="这些 frontmatter 字段会作为变量注入 Prompt，可在正文中用 {字段名} 引用。">
             <PairList
@@ -743,6 +802,19 @@ function PromptVisualEditor({ doc, onChange }: { doc: PromptDoc; onChange: (data
           </ConfigField>
         </div>
       </div>
+      {doc.apmTools !== "off" && (
+        <div className="visual-section">
+          <h3>APM 工具权限</h3>
+          <ConfigField label="显式 op 列表" hint="留空时使用上方预设；填写后只启用这里列出的操作。可在下拉中选择，也可输入自定义 op。">
+            <StringList
+              items={doc.apmOps}
+              options={APM_TOOL_OPS}
+              placeholder="stage_plan.update"
+              onChange={(apmOps) => onChange({ ...doc, apmOps })}
+            />
+          </ConfigField>
+        </div>
+      )}
       <div className="visual-section grow">
         <h3>Prompt 内容</h3>
         <textarea

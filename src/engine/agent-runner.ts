@@ -1,4 +1,7 @@
 import { parseSkillsEnabled } from "../config/skills.js";
+import { parseApmToolConfig } from "../config/apm-tools.js";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import type { ApmEvent, ApmEventInput } from "../types/events.js";
 import type { Dict, PromptDefinition } from "../types.js";
 import { isRunningInSea } from "../utils/sea-bootstrap.js";
@@ -11,6 +14,7 @@ interface AgentSession {
   model: string;
   cwd: string;
   skillsEnabled: boolean;
+  apmToolKey: string;
   transcript: Array<{ role: "user" | "assistant"; text: string }>;
 }
 
@@ -22,12 +26,14 @@ export interface AgentRunnerOptions {
   apiKey?: string;
   apiKeyProvider?: () => string | undefined;
   sdkModuleLoader?: () => Promise<any>;
+  apmToolContextProvider?: () => { baseUrl?: string; token?: string; root?: string };
 }
 
 export class AgentRunner {
   private readonly configuredApiKey?: string;
   private readonly apiKeyProvider?: () => string | undefined;
   private readonly sdkModuleLoader?: () => Promise<any>;
+  private readonly apmToolContextProvider?: () => { baseUrl?: string; token?: string; root?: string };
   private readonly sessions = new Map<string, AgentSession>();
   private sdkModule?: any;
 
@@ -35,6 +41,7 @@ export class AgentRunner {
     this.configuredApiKey = options.apiKey;
     this.apiKeyProvider = options.apiKeyProvider;
     this.sdkModuleLoader = options.sdkModuleLoader;
+    this.apmToolContextProvider = options.apmToolContextProvider;
   }
 
   public async runPrompt(
@@ -46,6 +53,7 @@ export class AgentRunner {
     callbacks?: AgentRunCallbacks,
   ): Promise<string> {
     const skillsEnabled = parseSkillsEnabled(prompt.metadata);
+    const apmTools = parseApmToolConfig(prompt.metadata);
     return this.sendMessage(
       sessionKey,
       renderedPrompt,
@@ -54,6 +62,7 @@ export class AgentRunner {
       variables,
       prompt.name,
       skillsEnabled,
+      apmTools,
       callbacks,
     );
   }
@@ -68,6 +77,7 @@ export class AgentRunner {
   ): Promise<string> {
     const existing = this.sessions.get(sessionKey);
     const skillsEnabled = existing?.skillsEnabled ?? false;
+    const apmTools = existing?.apmToolKey ? parseApmToolKey(existing.apmToolKey) : { enabled: false, ops: [] };
     return this.sendMessage(
       sessionKey,
       message,
@@ -76,6 +86,7 @@ export class AgentRunner {
       variables,
       "follow-up",
       skillsEnabled,
+      apmTools,
       callbacks,
     );
   }
@@ -108,19 +119,21 @@ export class AgentRunner {
     _variables: Dict,
     label: string,
     skillsEnabled: boolean,
+    apmTools: { enabled: boolean; ops: string[] },
     callbacks?: AgentRunCallbacks,
   ): Promise<string> {
     if (runtime.kind === "ssh") {
-      const session = await this.getOrCreateSession(sessionKey, model, runtime, skillsEnabled);
+      const session = await this.getOrCreateSession(sessionKey, model, runtime, skillsEnabled, apmTools);
       const output = await this.runRemotePrompt(session, userText, runtime, callbacks);
       session.transcript.push({ role: "user", text: userText });
       session.transcript.push({ role: "assistant", text: output });
       return output;
     }
 
-    const session = await this.getOrCreateSession(sessionKey, model, runtime, skillsEnabled);
+    const session = await this.getOrCreateSession(sessionKey, model, runtime, skillsEnabled, apmTools);
     try {
-      const run = await session.agent.send(userText);
+      const sendOptions = this.createApmToolSendOptions(sessionKey, apmTools);
+      const run = await session.agent.send(userText, sendOptions);
       const streamed = await consumeRunStream(run, callbacks);
       const result = await run.wait();
       if (result.status === "error") {
@@ -144,6 +157,7 @@ export class AgentRunner {
     model: string,
     runtime: HostRuntime,
     skillsEnabled: boolean,
+    apmTools: { enabled: boolean; ops: string[] },
   ): Promise<AgentSession> {
     const found = this.sessions.get(key);
     if (found) {
@@ -159,6 +173,7 @@ export class AgentRunner {
       model,
       cwd: runtime.workspace,
       skillsEnabled,
+      apmToolKey: serializeApmToolKey(apmTools),
       transcript: [],
     };
     if (runtime.kind === "local") {
@@ -171,6 +186,7 @@ export class AgentRunner {
             cwd: runtime.workspace,
             ...(skillsEnabled ? { settingSources: ["project"] } : {}),
           },
+          ...(this.createApmToolSendOptions(key, apmTools) ?? {}),
         });
       } catch (error) {
         throw new Error(withBunHint(`Failed to create local Cursor agent: ${String(error)}`));
@@ -178,6 +194,37 @@ export class AgentRunner {
     }
     this.sessions.set(key, created);
     return created;
+  }
+
+  private createApmToolSendOptions(sessionKey: string, apmTools: { enabled: boolean; ops: string[] }): any | undefined {
+    if (!apmTools.enabled || apmTools.ops.length === 0) {
+      return undefined;
+    }
+    const context = this.apmToolContextProvider?.();
+    if (!context?.baseUrl || !context.token) {
+      return undefined;
+    }
+    const [runId, stageName, ...promptParts] = sessionKey.split(".");
+    const promptName = promptParts.join(".");
+    const mcpPath = resolveApmMcpEntrypoint();
+    return {
+      mcpServers: {
+        apm: {
+          type: "stdio",
+          command: process.execPath,
+          args: [mcpPath],
+          env: {
+            APM_HTTP_BASE_URL: context.baseUrl,
+            APM_HTTP_TOKEN: context.token,
+            APM_HOME: context.root ?? "",
+            APM_RUN_ID: runId ?? "",
+            APM_STAGE: stageName ?? "",
+            APM_PROMPT: promptName ?? "",
+            APM_ALLOWED_OPS: apmTools.ops.join(","),
+          },
+        },
+      },
+    };
   }
 
   private async getSdkModule(): Promise<any> {
@@ -436,6 +483,38 @@ function withBunHint(message: string): string {
     return `${message}. Running from SEA binary; verify runtime assets under ~/.apm/runtime/ were extracted successfully.`;
   }
   return message;
+}
+
+function resolveApmMcpEntrypoint(): string {
+  const fromEnv = process.env.APM_MCP_ENTRYPOINT;
+  if (fromEnv?.trim()) {
+    return fromEnv.trim();
+  }
+  if (process.argv[1]) {
+    const scriptDir = path.dirname(path.resolve(process.argv[1]));
+    const candidates = [
+      path.join(scriptDir, "apm-mcp.bundle.cjs"),
+      path.join(scriptDir, "apm-mcp.js"),
+      path.resolve(process.cwd(), "dist/src/bin/apm-mcp.js"),
+      path.resolve(process.cwd(), "dist/bundle/apm-mcp.bundle.cjs"),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return candidates[0];
+  }
+  return path.resolve(process.cwd(), "dist/src/bin/apm-mcp.js");
+}
+
+function serializeApmToolKey(apmTools: { enabled: boolean; ops: string[] }): string {
+  return apmTools.enabled ? apmTools.ops.join(",") : "";
+}
+
+function parseApmToolKey(key: string): { enabled: boolean; ops: string[] } {
+  const ops = key.split(",").map((item) => item.trim()).filter(Boolean);
+  return { enabled: ops.length > 0, ops };
 }
 
 function isCursorAgentError(error: unknown, CursorAgentErrorCtor?: any): error is { message: string } {

@@ -62,6 +62,15 @@ export interface PromptMessageRecord {
 
 export type RunStatus = "running" | "paused" | "finished" | "failed" | "stopped";
 
+export interface RuntimeStagePlanNode {
+  prompts: string[];
+  nextStages: string[];
+  source: "workflow" | "runtime";
+  note?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
 export interface RunRecord {
   id: string;
   entryName: string;
@@ -80,6 +89,13 @@ export interface RunRecord {
   variables: Dict;
   promptHistory: PromptExecutionRecord[];
   messageHistory: PromptMessageRecord[];
+  stagePlan?: Record<string, RuntimeStagePlanNode>;
+  completedStages?: string[];
+  pauseRequested?: boolean;
+  stopRequested?: boolean;
+  tags?: string[];
+  note?: string;
+  parentRunId?: string;
   lastEventSeq?: number;
 }
 

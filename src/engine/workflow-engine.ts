@@ -8,6 +8,7 @@ import { AgentRunner } from "./agent-runner.js";
 import { RunStore } from "../state/run-store.js";
 import { HitlController } from "./hitl-controller.js";
 import type { WorkflowBundle } from "../config/loaders.js";
+import { buildCatalog, loadPrompt } from "../config/loaders.js";
 
 export interface WorkflowEngineDeps {
   store: RunStore;
@@ -115,14 +116,14 @@ export class WorkflowEngine {
         nextStageBatch.map(async (stageName) => {
           executedStages.add(stageName);
           activeStageForHitl = stageName;
-          const stage = bundle.stages.get(stageName);
-          if (!stage) {
+          const planStage = await this.resolveRuntimeStage(bundle, run.id, stageName);
+          if (!planStage) {
             throw new Error(`Missing stage "${stageName}".`);
           }
-          const stageBody = interpolateText(stage.rawBody, {
+          const stageBody = interpolateText(planStage.rawBody, {
             variables,
             history,
-            source: stage.path,
+            source: planStage.path,
           });
           await this.store.updateRun(run.id, {
             currentStage: stageName,
@@ -143,8 +144,8 @@ export class WorkflowEngine {
             data: { action: "body", body: stageBody },
           });
 
-          for (const promptName of stage.prompts) {
-            const promptDef = bundle.prompts.get(promptName);
+          for (const promptName of planStage.prompts) {
+            const promptDef = await this.resolvePrompt(bundle, promptName);
             if (!promptDef) {
               throw new Error(`Missing prompt "${promptName}" for stage "${stageName}".`);
             }
@@ -240,8 +241,13 @@ export class WorkflowEngine {
           }
 
           await this.store.updateRun(run.id, { currentPrompt: undefined });
+          const latestCompleted = await this.store.getRun(run.id);
+          await this.store.updateRun(run.id, {
+            completedStages: [...new Set([...(latestCompleted?.completedStages ?? []), stageName])],
+          });
 
-          for (const next of stage.nextStages) {
+          const latestPlanStage = await this.resolveRuntimeStage(bundle, run.id, stageName);
+          for (const next of latestPlanStage?.nextStages ?? planStage.nextStages) {
             nextCandidates.add(next);
           }
         }),
@@ -333,5 +339,47 @@ export class WorkflowEngine {
       runId,
       ...input,
     });
+  }
+
+  private async resolveRuntimeStage(
+    bundle: WorkflowBundle,
+    runId: string,
+    stageName: string,
+  ): Promise<{ prompts: string[]; nextStages: string[]; rawBody: string; path: string } | undefined> {
+    const latestRun = await this.store.getRun(runId);
+    const planNode = latestRun?.stagePlan?.[stageName];
+    const configStage = bundle.stages.get(stageName);
+    if (planNode) {
+      return {
+        prompts: planNode.prompts,
+        nextStages: planNode.nextStages,
+        rawBody: configStage?.rawBody ?? ["## 提示词", ...planNode.prompts.map((item) => `- ${item}`)].join("\n"),
+        path: configStage?.path ?? `${bundle.rootDir}/runtime/${stageName}`,
+      };
+    }
+    if (!configStage) {
+      return undefined;
+    }
+    return {
+      prompts: configStage.prompts,
+      nextStages: configStage.nextStages,
+      rawBody: configStage.rawBody,
+      path: configStage.path,
+    };
+  }
+
+  private async resolvePrompt(bundle: WorkflowBundle, promptName: string) {
+    const found = bundle.prompts.get(promptName);
+    if (found) {
+      return found;
+    }
+    const catalog = await buildCatalog(bundle.rootDir);
+    const filePath = catalog.prompts.get(promptName);
+    if (!filePath) {
+      return undefined;
+    }
+    const loaded = await loadPrompt(promptName, filePath);
+    bundle.prompts.set(promptName, loaded);
+    return loaded;
   }
 }

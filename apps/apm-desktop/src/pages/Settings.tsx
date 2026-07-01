@@ -2,11 +2,19 @@ import { useEffect, useState } from "react";
 import * as api from "../lib/api";
 import { openApmHome } from "../lib/desktop";
 import { useApp } from "../context/AppContext";
-import { PageHeader, StatusBadge } from "../components/UI";
+import { formatDate, PageHeader, StatusBadge } from "../components/UI";
 
 export function Settings() {
-  const { config, refresh, restartDaemon, context } = useApp();
-  const [section, setSection] = useState<"connection" | "storage" | "logs">("connection");
+  const {
+    config,
+    refresh,
+    restartDaemon,
+    context,
+    updateState,
+    checkUpdates,
+    installAvailableUpdate,
+  } = useApp();
+  const [section, setSection] = useState<"connection" | "storage" | "logs" | "updates">("connection");
   const [apiKey, setApiKey] = useState("");
   const [httpEnabled, setHttpEnabled] = useState(true);
   const [httpPort, setHttpPort] = useState(19740);
@@ -95,6 +103,10 @@ export function Settings() {
           <button type="button" className={section === "logs" ? "active" : ""} onClick={() => setSection("logs")}>
             日志与事件
             <span>全局日志窗口和默认条数</span>
+          </button>
+          <button type="button" className={section === "updates" ? "active" : ""} onClick={() => setSection("updates")}>
+            软件更新
+            <span>Release 检查和安装</span>
           </button>
         </aside>
 
@@ -288,6 +300,79 @@ export function Settings() {
             </div>
           )}
 
+          {section === "updates" && (
+            <div className="settings-section">
+              <div className="settings-section-head">
+                <div>
+                  <h2>软件更新</h2>
+                  <p>启动时会从 GitHub Release 自动检查一次更新，也可以在这里手动检查和安装。</p>
+                </div>
+                <StatusBadge status={updateState.available ? "warn" : "ok"} />
+              </div>
+              <div className="setting-row">
+                <div>
+                  <strong>更新状态</strong>
+                  <span>
+                    {updateState.checking
+                      ? "正在检查更新..."
+                      : updateState.available
+                        ? `发现新版本 ${updateState.available.version}`
+                        : "当前已是最新版本或尚未检查到可用更新。"}
+                  </span>
+                </div>
+                <button type="button" disabled={updateState.checking || updateState.installing} onClick={() => void checkUpdates()}>
+                  {updateState.checking ? "检查中..." : "检查更新"}
+                </button>
+              </div>
+              {updateState.available && (
+                <>
+                  <div className="setting-row">
+                    <div>
+                      <strong>版本</strong>
+                      <span>
+                        当前 {updateState.available.currentVersion}，最新 {updateState.available.version}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={updateState.installing}
+                      onClick={() => void installAvailableUpdate()}
+                    >
+                      {updateState.installing ? "安装中..." : "下载并安装"}
+                    </button>
+                  </div>
+                  {updateState.available.body && (
+                    <div className="update-notes">
+                      <strong>更新说明</strong>
+                      <pre>{updateState.available.body}</pre>
+                    </div>
+                  )}
+                </>
+              )}
+              {updateState.installing && (
+                <div className="update-progress">
+                  <div>
+                    <strong>下载进度</strong>
+                    <span>
+                      {formatBytes(updateState.downloadedBytes)}
+                      {updateState.contentLength ? ` / ${formatBytes(updateState.contentLength)}` : ""}
+                    </span>
+                  </div>
+                  <progress
+                    value={updateState.downloadedBytes}
+                    max={updateState.contentLength ?? Math.max(updateState.downloadedBytes, 1)}
+                  />
+                </div>
+              )}
+              <div className="setting-url">
+                <span>上次检查</span>
+                <code>{updateState.lastCheckedAt ? formatDate(updateState.lastCheckedAt) : "尚未检查"}</code>
+              </div>
+              {updateState.error && <div className="notice danger inline">{updateState.error}</div>}
+            </div>
+          )}
+
           {message && <div className="notice inline">{message}</div>}
         </section>
 
@@ -309,6 +394,8 @@ export function Settings() {
               <dd>{collectToolDetails ? "采集" : "摘要"}</dd>
               <dt>开发模式</dt>
               <dd>{context?.devMode ? "是" : "否"}</dd>
+              <dt>更新</dt>
+              <dd>{updateState.available ? `可更新到 ${updateState.available.version}` : "无可用更新"}</dd>
             </dl>
           </section>
           <section className="panel">
@@ -326,4 +413,18 @@ export function Settings() {
       </div>
     </div>
   );
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }

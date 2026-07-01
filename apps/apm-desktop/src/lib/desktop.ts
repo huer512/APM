@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
-import type { DaemonStatus, DesktopContext } from "./types";
+import { Channel, invoke } from "@tauri-apps/api/core";
+import type { DaemonStatus, DesktopContext, UpdateDownloadEvent, UpdateMetadata } from "./types";
 
 export async function getDesktopContext(): Promise<DesktopContext> {
   return invoke<DesktopContext>("get_desktop_context");
@@ -43,4 +43,17 @@ export async function renameApmFile(relativePath: string, newRelativePath: strin
 
 export async function deleteApmFile(relativePath: string): Promise<void> {
   await invoke("delete_apm_file", { relativePath });
+}
+
+export async function checkForUpdate(): Promise<UpdateMetadata | null> {
+  return invoke<UpdateMetadata | null>("check_for_update");
+}
+
+export async function installUpdate(onEvent: (event: UpdateDownloadEvent) => void): Promise<void> {
+  const channel = new Channel<UpdateDownloadEvent>(onEvent);
+  await invoke("install_update", { onEvent: channel });
+}
+
+export async function restartApp(): Promise<void> {
+  await invoke("restart_app");
 }

@@ -11,6 +11,7 @@ const sdkCjs = path.join(root, "node_modules/@cursor/sdk/dist/cjs/index.js");
 await fs.mkdir(outDir, { recursive: true });
 await ensureFile(path.join(root, "dist/src/bin/apm.js"), "Run `npm run build:js` first.");
 await ensureFile(path.join(root, "dist/src/bin/apm-daemon.js"), "Run `npm run build:js` first.");
+await ensureFile(path.join(root, "dist/src/bin/apm-mcp.js"), "Run `npm run build:js` first.");
 await ensureFile(path.join(root, "dist/bundle/assets-manifest.json"), "Run `npm run build:assets` first.");
 await ensureFile(sdkCjs, "Missing @cursor/sdk. Run `npm install` first.");
 
@@ -173,7 +174,18 @@ await esbuild.build({
 
 await rewriteBareSqliteRequires(path.join(outDir, "apm-daemon.bundle.cjs"));
 
-process.stdout.write("Bundled dist/bundle/apm.bundle.cjs, apm-daemon.bundle.cjs, cursor-sdk.bundle.cjs\n");
+await esbuild.build({
+  ...common,
+  entryPoints: [path.join(root, "dist/src/bin/apm-mcp.js")],
+  outfile: path.join(outDir, "apm-mcp.bundle.cjs"),
+  bundle: true,
+  plugins: [ignoreTypesPlugin],
+  define: {
+    "process.env.APM_BUNDLED": '"1"',
+  },
+});
+
+process.stdout.write("Bundled dist/bundle/apm.bundle.cjs, apm-daemon.bundle.cjs, apm-mcp.bundle.cjs, cursor-sdk.bundle.cjs\n");
 
 async function rewriteBareSqliteRequires(bundlePath) {
   let content = await fs.readFile(bundlePath, "utf8");

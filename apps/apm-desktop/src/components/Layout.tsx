@@ -2,8 +2,13 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useApp } from "../context/AppContext";
 
 export function Layout() {
-  const { daemonStatus, startDaemon, restartDaemon } = useApp();
+  const { daemonStatus, startDaemon, restartDaemon, updateState, installAvailableUpdate, dismissUpdate } = useApp();
   const ok = daemonStatus?.httpReachable ?? false;
+  const availableUpdate = updateState.available;
+  const showUpdateNotice =
+    availableUpdate &&
+    availableUpdate.version !== updateState.dismissedVersion &&
+    !updateState.installing;
   const navItems = [
     { to: "/", label: "总览", end: true },
     { to: "/workflows", label: "工作流" },
@@ -47,6 +52,22 @@ export function Layout() {
         </div>
       </aside>
       <main className="main">
+        {showUpdateNotice && (
+          <div className="notice update-notice">
+            <div>
+              <strong>发现新版本 {availableUpdate.version}</strong>
+              <span>当前版本 {availableUpdate.currentVersion}</span>
+            </div>
+            <div className="notice-actions">
+              <button type="button" className="primary" onClick={() => void installAvailableUpdate()}>
+                下载并安装
+              </button>
+              <button type="button" onClick={dismissUpdate}>
+                稍后
+              </button>
+            </div>
+          </div>
+        )}
         <Outlet />
       </main>
     </div>

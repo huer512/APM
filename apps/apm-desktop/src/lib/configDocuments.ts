@@ -17,6 +17,8 @@ export interface StageDoc {
 export interface PromptDoc {
   model: string;
   skills: boolean;
+  apmTools: string;
+  apmOps: string[];
   metadata: Array<{ key: string; value: string }>;
   body: string;
 }
@@ -109,7 +111,7 @@ export function parseConfigDocument(kind: ConfigKind, item: CatalogItem, raw: st
   }
 
   const metadata = Object.entries(parts.frontmatter)
-    .filter(([key]) => key !== "model" && key !== "skills")
+    .filter(([key]) => key !== "model" && key !== "skills" && key !== "apmTools" && key !== "apmOps")
     .map(([key, value]) => ({ key, value }));
   return {
     kind,
@@ -119,6 +121,8 @@ export function parseConfigDocument(kind: ConfigKind, item: CatalogItem, raw: st
     data: {
       model: parts.frontmatter.model ?? "auto",
       skills: isTruthy(parts.frontmatter.skills),
+      apmTools: parts.frontmatter.apmTools ?? "off",
+      apmOps: parseCsv(parts.frontmatter.apmOps),
       metadata,
       body: parts.body,
     },
@@ -174,6 +178,8 @@ export function serializeConfigDocument(doc: ConfigDocument): string {
     {
       model: data.model || "auto",
       skills: data.skills ? "true" : "",
+      apmTools: data.apmTools && data.apmTools !== "off" ? data.apmTools : "",
+      apmOps: data.apmOps.filter(Boolean).join(","),
       ...pairsToObject(data.metadata),
     },
     data.body,
@@ -250,6 +256,13 @@ function required(value: string | undefined, field: string): string[] {
 function isTruthy(value: string | undefined): boolean {
   const normalized = String(value ?? "").trim().toLowerCase();
   return normalized === "true" || normalized === "on" || normalized === "yes" || normalized === "1";
+}
+
+function parseCsv(value: string | undefined): string[] {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function unquote(value: string): string {
