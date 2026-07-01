@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import * as api from "../lib/api";
 import { useApp } from "../context/AppContext";
@@ -181,14 +181,38 @@ function RunActions({
   onToggle: () => void;
   onClose: () => void;
 }) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const runAndClose = (action: () => void) => {
     onClose();
     action();
   };
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const closeOnOutside = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        onClose();
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("mousedown", closeOnOutside);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("mousedown", closeOnOutside);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [onClose, open]);
+
   return (
     <div className="run-actions">
       <Link to={`/runs/${run.id}`}>查看</Link>
-      <div className="run-actions-menu">
+      <div className="run-actions-menu" ref={menuRef}>
         <button type="button" className="run-actions-trigger" disabled={busy} onClick={onToggle}>
           操作
           <span aria-hidden="true">⌄</span>
