@@ -274,6 +274,17 @@ fn daemon_status() -> DaemonStatus {
     }
 }
 
+fn node_compatible_path(path: &Path) -> PathBuf {
+    let raw = path.to_string_lossy();
+    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{}", rest));
+    }
+    if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    path.to_path_buf()
+}
+
 fn spawn_daemon_process(app: &AppHandle, home: &Path) -> Result<Child, String> {
     let stdout = daemon_log_file(home)?;
     let stderr = stdout.try_clone().map_err(|e| e.to_string())?;
@@ -329,6 +340,7 @@ fn spawn_daemon_process(app: &AppHandle, home: &Path) -> Result<Child, String> {
     let node_path = bundled_node_path(&resource_dir);
     let daemon_bundle = resource_dir.join("daemon").join("apm-daemon.bundle.cjs");
     let daemon_assets = resource_dir.join("daemon").join("assets");
+    let daemon_dir = resource_dir.join("daemon");
 
     if !node_path.exists() {
         return Err(format!(
@@ -349,19 +361,24 @@ fn spawn_daemon_process(app: &AppHandle, home: &Path) -> Result<Child, String> {
             "Starting bundled daemon. node={}, bundle={}, cwd={}, assets={}, APM_HOME={}",
             node_path.display(),
             daemon_bundle.display(),
-            resource_dir.join("daemon").display(),
+            daemon_dir.display(),
             daemon_assets.display(),
             home.display()
         ),
     );
 
-    let mut command = Command::new(&node_path);
+    let node_path_for_node = node_compatible_path(&node_path);
+    let daemon_bundle_for_node = node_compatible_path(&daemon_bundle);
+    let daemon_dir_for_node = node_compatible_path(&daemon_dir);
+    let daemon_assets_for_node = node_compatible_path(&daemon_assets);
+
+    let mut command = Command::new(&node_path_for_node);
     command
-        .arg(&daemon_bundle)
-        .current_dir(resource_dir.join("daemon"))
+        .arg(&daemon_bundle_for_node)
+        .current_dir(&daemon_dir_for_node)
         .env("APM_HOME", home)
-        .env("APM_DAEMON_RUNTIME_DIR", &daemon_assets)
-        .env("APM_SEA_RUNTIME_DIR", &daemon_assets)
+        .env("APM_DAEMON_RUNTIME_DIR", &daemon_assets_for_node)
+        .env("APM_SEA_RUNTIME_DIR", &daemon_assets_for_node)
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
 
@@ -378,8 +395,8 @@ fn spawn_daemon_process(app: &AppHandle, home: &Path) -> Result<Child, String> {
             format!(
                 "无法通过内置 Node runtime 启动 daemon: {}。runtime={}, bundle={}",
                 e,
-                node_path.display(),
-                daemon_bundle.display()
+                node_path_for_node.display(),
+                daemon_bundle_for_node.display()
             )
         })
 }
@@ -748,4 +765,37 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::node_compatible_path;
+    use std::path::Path;
+
+    #[test]
+    fn strips_windows_verbatim_disk_prefix_for_node() {
+        let path = Path::new(r"\\?\D:\Program Files\APM Desktop\daemon\apm-daemon.bundle.cjs");
+        assert_eq!(
+            node_compatible_path(path).to_string_lossy(),
+            r"D:\Program Files\APM Desktop\daemon\apm-daemon.bundle.cjs"
+        );
+    }
+
+    #[test]
+    fn strips_windows_verbatim_unc_prefix_for_node() {
+        let path = Path::new(r"\\?\UNC\server\share\APM Desktop\daemon\apm-daemon.bundle.cjs");
+        assert_eq!(
+            node_compatible_path(path).to_string_lossy(),
+            r"\\server\share\APM Desktop\daemon\apm-daemon.bundle.cjs"
+        );
+    }
+
+    #[test]
+    fn keeps_normal_paths_for_node() {
+        let path = Path::new(r"D:\Program Files\APM Desktop\daemon\apm-daemon.bundle.cjs");
+        assert_eq!(
+            node_compatible_path(path).to_string_lossy(),
+            r"D:\Program Files\APM Desktop\daemon\apm-daemon.bundle.cjs"
+        );
+    }
 }
