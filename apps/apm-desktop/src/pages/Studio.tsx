@@ -38,7 +38,7 @@ const CATEGORIES: Array<{ id: Category; label: string }> = [
 const APM_TOOL_PRESETS = [
   { value: "off", label: "关闭", description: "不向该提示词注入 APM 控制工具" },
   { value: "inspect", label: "只读查看", description: "查看工作流、实例、消息和系统状态" },
-  { value: "control", label: "运行控制", description: "允许暂停、恢复、停止、接管消息等操作" },
+  { value: "control", label: "运行控制", description: "允许暂停、恢复、接管消息等操作" },
   { value: "orchestrate", label: "编排控制", description: "允许修改当前实例后续阶段计划" },
   { value: "admin", label: "管理权限", description: "包含配置写入等高风险操作" },
   { value: "custom", label: "自定义", description: "只启用下方显式列出的 op" },
@@ -64,8 +64,6 @@ const APM_TOOL_OPS = [
   "run.variables",
   "run.pause",
   "run.resume",
-  "run.stop",
-  "run.rerun",
   "run.start",
   "run.delete",
   "run.set_note",

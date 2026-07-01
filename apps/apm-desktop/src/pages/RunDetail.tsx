@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import * as api from "../lib/api";
 import { useApp } from "../context/AppContext";
 import type { RunDetailResponse } from "../lib/types";
@@ -11,7 +11,6 @@ import { MessageHistoryList } from "../components/MessageHistoryList";
 export function RunDetail() {
   const { runId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
   const tab = searchParams.get("tab") === "attach" ? "attach" : "overview";
   const autoAttach = searchParams.get("autoAttach") === "1";
   const { daemonStatus } = useApp();
@@ -65,20 +64,20 @@ export function RunDetail() {
   );
   const latestMessages = useMemo(() => buildDisplayMessages(scopedMessages).slice(-12), [scopedMessages]);
 
-  const stop = async () => {
+  const pause = async () => {
     if (!runId) {
       return;
     }
-    await api.stopRun(runId);
+    await api.pauseRun(runId);
     await load();
   };
 
-  const retry = async () => {
+  const resume = async () => {
     if (!runId) {
       return;
     }
-    const result = await api.retryRun(runId);
-    navigate(`/runs/${result.runId}`);
+    await api.resumeRun(runId);
+    await load();
   };
 
   return (
@@ -89,8 +88,8 @@ export function RunDetail() {
         actions={
           <>
             {run && <StatusBadge status={run.status} />}
-            {(run?.status === "running" || run?.status === "paused") && <button type="button" onClick={() => void stop()}>停止运行</button>}
-            {run && (run.status === "failed" || run.status === "finished" || run.status === "stopped") && <button type="button" className="primary" onClick={() => void retry()}>重新运行</button>}
+            {run?.status === "running" && <button type="button" onClick={() => void pause()}>暂停运行</button>}
+            {run?.status === "paused" && <button type="button" onClick={() => void resume()}>恢复运行</button>}
             <button type="button" onClick={() => setSearchParams({ tab: "attach" })}>接管运行</button>
           </>
         }

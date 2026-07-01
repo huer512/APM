@@ -276,10 +276,6 @@ export class ApmDaemonServer {
         );
       case "run.detail":
         return this.getRunDetail(asString(params.runId, "runId"));
-      case "run.stop":
-        return this.stopRun(asString(params.runId, "runId"));
-      case "run.retry":
-        return this.retryRun(asString(params.runId, "runId"));
       case "run.pause":
         return this.pauseRun(asString(params.runId, "runId"));
       case "run.resume":
@@ -688,7 +684,7 @@ export class ApmDaemonServer {
     };
   }
 
-  private async stopRun(runId: string): Promise<{ run: RunRecord }> {
+  private async closeRunForDeletion(runId: string): Promise<{ run: RunRecord }> {
     const run = await mustRun(this.store, runId);
     if (run.status !== "running" && run.status !== "paused") {
       return { run };
@@ -699,25 +695,15 @@ export class ApmDaemonServer {
       finishedAt: new Date().toISOString(),
       waitingForNext: false,
       activeBatch: [],
-      error: "Stopped by user",
+      error: "Closed for deletion",
     });
     await this.store.appendEvent(runId, {
       runId,
       level: "warn",
       kind: "run",
-      data: { action: "stopped", detail: "Stopped by user" },
+      data: { action: "closed_for_deletion", detail: "Closed before deleting run" },
     });
     return { run: updated };
-  }
-
-  private async retryRun(runId: string): Promise<{ runId: string }> {
-    const run = await mustRun(this.store, runId);
-    return this.handleRun({
-      entryName: run.entryName,
-      params: run.variables,
-      attach: run.attachMode,
-      detach: true,
-    });
   }
 
   private async pauseRun(runId: string): Promise<{ run: RunRecord }> {
@@ -735,7 +721,7 @@ export class ApmDaemonServer {
   private async deleteRun(runId: string): Promise<{ run: RunRecord }> {
     const run = await mustRun(this.store, runId);
     if (run.status === "running" || run.status === "paused") {
-      await this.stopRun(runId);
+      await this.closeRunForDeletion(runId);
     }
     this.hitl.setAttached(runId, false);
     await this.runner.closeByPrefix(`${runId}.`);
@@ -810,10 +796,6 @@ export class ApmDaemonServer {
         return this.attachBegin(asString(args.runId ?? runId, "runId"));
       case "run.resume":
         return this.attachEnd(asString(args.runId ?? runId, "runId"));
-      case "run.stop":
-        return this.stopRun(asString(args.runId ?? runId, "runId"));
-      case "run.rerun":
-        return this.retryRun(asString(args.runId ?? runId, "runId"));
       case "run.start":
         return this.handleRun({
           entryName: asString(args.entryName ?? args.name, "entryName"),
@@ -864,7 +846,7 @@ export class ApmDaemonServer {
         return {
           maxReturnedEvents: 500,
           stagePlanUpdate: "May edit current or future runtime stages for this run only.",
-          destructiveOpsRequirePermission: ["config.apply_patch", "run.stop"],
+          destructiveOpsRequirePermission: ["config.apply_patch"],
         };
       case "config.validate":
         return this.validateWorkflow(asString(args.name ?? args.entryName, "name"));

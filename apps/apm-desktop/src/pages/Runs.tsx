@@ -135,8 +135,6 @@ export function Runs() {
                     busy={busyRunId === run.id}
                     onPause={() => void runAction(run.id, () => api.pauseRun(run.id))}
                     onResume={() => void runAction(run.id, () => api.resumeRun(run.id))}
-                    onStop={() => void runAction(run.id, () => api.stopRun(run.id))}
-                    onRetry={() => void runAction(run.id, () => api.retryRun(run.id))}
                     onDelete={() => {
                       setOpenMenuRunId("");
                       setDeleteTarget(run);
@@ -169,8 +167,6 @@ function RunActions({
   busy,
   onPause,
   onResume,
-  onStop,
-  onRetry,
   onDelete,
   open,
   onToggle,
@@ -180,14 +176,11 @@ function RunActions({
   busy: boolean;
   onPause: () => void;
   onResume: () => void;
-  onStop: () => void;
-  onRetry: () => void;
   onDelete: () => void;
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
 }) {
-  const active = run.status === "running" || run.status === "paused";
   const runAndClose = (action: () => void) => {
     onClose();
     action();
@@ -204,8 +197,6 @@ function RunActions({
           <div className="run-actions-popover">
             {run.status === "running" && <button type="button" onClick={() => runAndClose(onPause)}>暂停</button>}
             {run.status === "paused" && <button type="button" onClick={() => runAndClose(onResume)}>恢复</button>}
-            {!active && <button type="button" onClick={() => runAndClose(onRetry)}>重跑</button>}
-            {active && <button type="button" onClick={() => runAndClose(onStop)}>停止</button>}
             <Link to={`/runs/${run.id}?tab=attach&autoAttach=1`} onClick={onClose}>接管</Link>
             <button type="button" className="danger-link" onClick={() => runAndClose(onDelete)}>删除</button>
           </div>
@@ -232,7 +223,7 @@ function DeleteRunModal({
         <header>
           <div>
             <h2 id="delete-run-title">删除实例</h2>
-            <p>删除后会移除该实例记录和事件日志。运行中的实例会先停止。</p>
+            <p>删除后会移除该实例记录和事件日志。运行中的实例会先结束执行会话。</p>
           </div>
           <button type="button" className="modal-close" onClick={onCancel} aria-label="关闭">x</button>
         </header>
