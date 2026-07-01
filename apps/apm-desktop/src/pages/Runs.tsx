@@ -183,13 +183,12 @@ function RunActions({
       ) : run.status === "paused" ? (
         <button type="button" disabled={busy} onClick={onResume}>恢复</button>
       ) : (
-        <span className="run-action-placeholder" aria-hidden="true" />
-      )}
-      {active && (
-        <button type="button" disabled={busy} onClick={onStop}>停止</button>
-      )}
-      {!active && (
         <button type="button" disabled={busy} onClick={onRetry}>重跑</button>
+      )}
+      {active ? (
+        <button type="button" disabled={busy} onClick={onStop}>停止</button>
+      ) : (
+        <span className="run-action-placeholder" aria-hidden="true" />
       )}
       <Link to={`/runs/${run.id}?tab=attach&autoAttach=1`}>接管</Link>
       <button type="button" className="danger-link" disabled={busy} onClick={onDelete}>删除</button>
