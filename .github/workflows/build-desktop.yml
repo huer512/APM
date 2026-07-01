@@ -66,7 +66,7 @@ jobs:
           {
             echo "TAURI_SIGNING_PRIVATE_KEY<<${delimiter}"
             cat "$key_path"
-            echo "${delimiter}"
+            printf '\n%s\n' "${delimiter}"
           } >> "$GITHUB_ENV"
 
       - name: Configure release updater key
@@ -83,15 +83,15 @@ jobs:
           key_delimiter="APM_RELEASE_KEY_$(date +%s)_${RANDOM}_${RANDOM}"
           {
             echo "TAURI_SIGNING_PRIVATE_KEY<<${key_delimiter}"
-            echo "$RELEASE_UPDATER_KEY"
-            echo "${key_delimiter}"
+            printf '%s\n' "$RELEASE_UPDATER_KEY"
+            printf '%s\n' "${key_delimiter}"
           } >> "$GITHUB_ENV"
           if [ -n "$RELEASE_UPDATER_KEY_PASSWORD" ]; then
             password_delimiter="APM_RELEASE_KEY_PASSWORD_$(date +%s)_${RANDOM}_${RANDOM}"
             {
               echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<${password_delimiter}"
-              echo "$RELEASE_UPDATER_KEY_PASSWORD"
-              echo "${password_delimiter}"
+              printf '%s\n' "$RELEASE_UPDATER_KEY_PASSWORD"
+              printf '%s\n' "${password_delimiter}"
             } >> "$GITHUB_ENV"
           fi
 
