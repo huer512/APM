@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -83,6 +84,10 @@ fn desktop_daemon_pid_path(home: &Path) -> PathBuf {
     home.join("state").join("desktop-daemon.pid")
 }
 
+fn desktop_daemon_log_path(home: &Path) -> PathBuf {
+    home.join("state").join("desktop-daemon.log")
+}
+
 fn repo_root_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -95,6 +100,33 @@ fn ensure_apm_dirs(home: &Path) -> Result<(), String> {
         fs::create_dir_all(home.join(sub)).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn append_daemon_log(home: &Path, message: &str) {
+    let _ = ensure_apm_dirs(home);
+    let path = desktop_daemon_log_path(home);
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{}", message);
+    }
+}
+
+fn daemon_log_file(home: &Path) -> Result<fs::File, String> {
+    ensure_apm_dirs(home)?;
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(desktop_daemon_log_path(home))
+        .map_err(|e| e.to_string())
+}
+
+fn daemon_log_tail(home: &Path) -> String {
+    let raw = fs::read_to_string(desktop_daemon_log_path(home)).unwrap_or_default();
+    const MAX_LEN: usize = 4000;
+    let chars: Vec<char> = raw.chars().collect();
+    if chars.len() <= MAX_LEN {
+        return raw;
+    }
+    chars[chars.len() - MAX_LEN..].iter().collect()
 }
 
 fn read_token(home: &Path) -> Option<String> {
@@ -243,13 +275,16 @@ fn daemon_status() -> DaemonStatus {
 }
 
 fn spawn_daemon_process(app: &AppHandle, home: &Path) -> Result<Child, String> {
+    let stdout = daemon_log_file(home)?;
+    let stderr = stdout.try_clone().map_err(|e| e.to_string())?;
     if let Ok(path) = std::env::var("APM_DAEMON_PATH") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
+            append_daemon_log(home, &format!("Starting daemon from APM_DAEMON_PATH: {}", trimmed));
             return Command::new(trimmed)
                 .env("APM_HOME", home)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stdout(Stdio::from(stdout))
+                .stderr(Stdio::from(stderr))
                 .spawn()
                 .map_err(|e| format!("无法启动 APM_DAEMON_PATH 指定的 daemon: {}", e));
         }
@@ -259,22 +294,30 @@ fn spawn_daemon_process(app: &AppHandle, home: &Path) -> Result<Child, String> {
         let repo_root = repo_root_dir();
         let compiled_daemon = repo_root.join("dist").join("src").join("bin").join("apm-daemon.js");
         if compiled_daemon.exists() {
+            append_daemon_log(
+                home,
+                &format!("Starting dev daemon via node: {}", compiled_daemon.display()),
+            );
             return Command::new("node")
                 .arg(compiled_daemon)
                 .current_dir(&repo_root)
                 .env("APM_HOME", home)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stdout(Stdio::from(stdout))
+                .stderr(Stdio::from(stderr))
                 .spawn()
                 .map_err(|e| format!("无法在开发模式启动已编译 daemon: {}", e));
         }
+        append_daemon_log(
+            home,
+            &format!("Starting dev daemon via npm in {}", repo_root.display()),
+        );
         return Command::new("npm")
             .arg("run")
             .arg("dev:daemon")
             .current_dir(&repo_root)
             .env("APM_HOME", home)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr))
             .spawn()
             .map_err(|e| format!("无法在开发模式启动 daemon: {}", e));
     }
@@ -300,14 +343,36 @@ fn spawn_daemon_process(app: &AppHandle, home: &Path) -> Result<Child, String> {
         ));
     }
 
-    Command::new(&node_path)
+    append_daemon_log(
+        home,
+        &format!(
+            "Starting bundled daemon. node={}, bundle={}, cwd={}, assets={}, APM_HOME={}",
+            node_path.display(),
+            daemon_bundle.display(),
+            resource_dir.join("daemon").display(),
+            daemon_assets.display(),
+            home.display()
+        ),
+    );
+
+    let mut command = Command::new(&node_path);
+    command
         .arg(&daemon_bundle)
         .current_dir(resource_dir.join("daemon"))
         .env("APM_HOME", home)
         .env("APM_DAEMON_RUNTIME_DIR", &daemon_assets)
         .env("APM_SEA_RUNTIME_DIR", &daemon_assets)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    command
         .spawn()
         .map_err(|e| {
             format!(
@@ -401,12 +466,46 @@ fn daemon_start(app: AppHandle, state: State<DaemonState>) -> Result<DaemonStatu
         }
     }
 
-    let sidecar = spawn_daemon_process(&app, &home)?;
+    append_daemon_log(&home, "Daemon start requested by desktop.");
+    let mut sidecar = spawn_daemon_process(&app, &home)?;
+
+    let early_exit_deadline = Instant::now() + Duration::from_millis(900);
+    while Instant::now() < early_exit_deadline {
+        if let Some(status) = sidecar.try_wait().map_err(|e| e.to_string())? {
+            clear_desktop_daemon_pid(&home);
+            append_daemon_log(
+                &home,
+                &format!("Daemon exited during startup with status: {}", status),
+            );
+            return Err(format!(
+                "Daemon 启动后立即退出。请查看日志: {}\n{}",
+                desktop_daemon_log_path(&home).display(),
+                daemon_log_tail(&home)
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
     write_desktop_daemon_pid(&home, &sidecar)?;
     *guard = Some(sidecar);
 
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < deadline {
+        if let Some(child) = guard.as_mut() {
+            if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+                *guard = None;
+                clear_desktop_daemon_pid(&home);
+                append_daemon_log(
+                    &home,
+                    &format!("Daemon exited before HTTP health became reachable: {}", status),
+                );
+                return Err(format!(
+                    "Daemon 未能启动 HTTP 服务并已退出。请查看日志: {}\n{}",
+                    desktop_daemon_log_path(&home).display(),
+                    daemon_log_tail(&home)
+                ));
+            }
+        }
         if let Some(base) = http_base_from_config(&home) {
             if check_http_health(&base) {
                 return Ok(daemon_status());

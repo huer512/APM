@@ -77,14 +77,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshDaemon]);
 
   const startDaemon = useCallback(async () => {
-    await desktop.startDaemon();
-    const ctx = await desktop.getDesktopContext();
-    setContext(ctx);
-    if (ctx.httpBaseUrl && ctx.httpToken) {
-      api.setApiCredentials(ctx.httpBaseUrl, ctx.httpToken);
+    setError(null);
+    try {
+      await desktop.startDaemon();
+      const ctx = await desktop.getDesktopContext();
+      setContext(ctx);
+      if (ctx.httpBaseUrl && ctx.httpToken) {
+        api.setApiCredentials(ctx.httpBaseUrl, ctx.httpToken);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      await refreshDaemon();
     }
-    await refresh();
-  }, [refresh]);
+  }, [refresh, refreshDaemon]);
 
   const stopDaemon = useCallback(async () => {
     await desktop.stopDaemon();
@@ -92,9 +98,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshDaemon]);
 
   const restartDaemon = useCallback(async () => {
-    await desktop.restartDaemon();
-    await refresh();
-  }, [refresh]);
+    setError(null);
+    try {
+      await desktop.restartDaemon();
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      await refreshDaemon();
+    }
+  }, [refresh, refreshDaemon]);
 
   const checkUpdates = useCallback(async () => {
     setUpdateState((current) => ({ ...current, checking: true, error: null }));

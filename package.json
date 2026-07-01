@@ -30,7 +30,8 @@
     "dev:cli": "tsx src/bin/apm.ts",
     "desktop:install": "npm install --workspace=apm-desktop",
     "desktop:dev": "npm run tauri:dev --workspace=apm-desktop",
-    "desktop:build": "npm run build:desktop-resources && node scripts/tauri-build-platform.mjs",
+    "smoke:desktop-resources": "node scripts/desktop-resource-smoke.mjs",
+    "desktop:build": "npm run build:desktop-resources && npm run smoke:desktop-resources && node scripts/tauri-build-platform.mjs",
     "desktop:vite": "npm run build --workspace=apm-desktop",
     "test": "tsx --test tests/*.test.ts"
   },
