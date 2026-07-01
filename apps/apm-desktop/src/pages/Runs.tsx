@@ -20,6 +20,7 @@ export function Runs() {
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [busyRunId, setBusyRunId] = useState("");
+  const [openMenuRunId, setOpenMenuRunId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<RunRecord | null>(null);
   const [error, setError] = useState("");
 
@@ -136,7 +137,13 @@ export function Runs() {
                     onResume={() => void runAction(run.id, () => api.resumeRun(run.id))}
                     onStop={() => void runAction(run.id, () => api.stopRun(run.id))}
                     onRetry={() => void runAction(run.id, () => api.retryRun(run.id))}
-                    onDelete={() => setDeleteTarget(run)}
+                    onDelete={() => {
+                      setOpenMenuRunId("");
+                      setDeleteTarget(run);
+                    }}
+                    open={openMenuRunId === run.id}
+                    onToggle={() => setOpenMenuRunId((current) => (current === run.id ? "" : run.id))}
+                    onClose={() => setOpenMenuRunId("")}
                   />
                 </td>
               </tr>
@@ -165,6 +172,9 @@ function RunActions({
   onStop,
   onRetry,
   onDelete,
+  open,
+  onToggle,
+  onClose,
 }: {
   run: RunRecord;
   busy: boolean;
@@ -173,25 +183,34 @@ function RunActions({
   onStop: () => void;
   onRetry: () => void;
   onDelete: () => void;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
 }) {
   const active = run.status === "running" || run.status === "paused";
+  const runAndClose = (action: () => void) => {
+    onClose();
+    action();
+  };
   return (
     <div className="run-actions">
       <Link to={`/runs/${run.id}`}>查看</Link>
-      {run.status === "running" ? (
-        <button type="button" disabled={busy} onClick={onPause}>暂停</button>
-      ) : run.status === "paused" ? (
-        <button type="button" disabled={busy} onClick={onResume}>恢复</button>
-      ) : (
-        <button type="button" disabled={busy} onClick={onRetry}>重跑</button>
-      )}
-      {active ? (
-        <button type="button" disabled={busy} onClick={onStop}>停止</button>
-      ) : (
-        <span className="run-action-placeholder" aria-hidden="true" />
-      )}
-      <Link to={`/runs/${run.id}?tab=attach&autoAttach=1`}>接管</Link>
-      <button type="button" className="danger-link" disabled={busy} onClick={onDelete}>删除</button>
+      <div className="run-actions-menu">
+        <button type="button" className="run-actions-trigger" disabled={busy} onClick={onToggle}>
+          操作
+          <span aria-hidden="true">⌄</span>
+        </button>
+        {open && (
+          <div className="run-actions-popover">
+            {run.status === "running" && <button type="button" onClick={() => runAndClose(onPause)}>暂停</button>}
+            {run.status === "paused" && <button type="button" onClick={() => runAndClose(onResume)}>恢复</button>}
+            {!active && <button type="button" onClick={() => runAndClose(onRetry)}>重跑</button>}
+            {active && <button type="button" onClick={() => runAndClose(onStop)}>停止</button>}
+            <Link to={`/runs/${run.id}?tab=attach&autoAttach=1`} onClick={onClose}>接管</Link>
+            <button type="button" className="danger-link" onClick={() => runAndClose(onDelete)}>删除</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -62,10 +62,11 @@ jobs:
         run: |
           key_path="$RUNNER_TEMP/apm-ci-updater.key"
           npm run tauri signer generate --workspace=apm-desktop -- --ci -f -w "$key_path"
+          delimiter="APM_SIGNING_KEY_$(date +%s)_${RANDOM}_${RANDOM}"
           {
-            echo "TAURI_SIGNING_PRIVATE_KEY<<EOF"
+            echo "TAURI_SIGNING_PRIVATE_KEY<<${delimiter}"
             cat "$key_path"
-            echo "EOF"
+            echo "${delimiter}"
           } >> "$GITHUB_ENV"
 
       - name: Configure release updater key
@@ -79,16 +80,18 @@ jobs:
             echo "TAURI_SIGNING_PRIVATE_KEY is required for release updater artifacts." >&2
             exit 1
           fi
+          key_delimiter="APM_RELEASE_KEY_$(date +%s)_${RANDOM}_${RANDOM}"
           {
-            echo "TAURI_SIGNING_PRIVATE_KEY<<EOF"
+            echo "TAURI_SIGNING_PRIVATE_KEY<<${key_delimiter}"
             echo "$RELEASE_UPDATER_KEY"
-            echo "EOF"
+            echo "${key_delimiter}"
           } >> "$GITHUB_ENV"
           if [ -n "$RELEASE_UPDATER_KEY_PASSWORD" ]; then
+            password_delimiter="APM_RELEASE_KEY_PASSWORD_$(date +%s)_${RANDOM}_${RANDOM}"
             {
-              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<EOF"
+              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<${password_delimiter}"
               echo "$RELEASE_UPDATER_KEY_PASSWORD"
-              echo "EOF"
+              echo "${password_delimiter}"
             } >> "$GITHUB_ENV"
           fi
 

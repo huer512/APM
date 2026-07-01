@@ -104,47 +104,83 @@ textarea {
 
 .run-actions {
   display: grid;
-  grid-template-columns: repeat(5, 36px);
+  grid-template-columns: 44px 82px;
   align-items: center;
   justify-content: start;
-  gap: 10px;
-  min-width: 220px;
+  gap: 12px;
+  min-width: 138px;
 }
 
 .run-actions a,
 .run-actions button {
-  min-height: 28px;
-  width: 36px;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  min-height: 32px;
   color: var(--accent-strong);
   font-weight: 700;
   white-space: nowrap;
-  text-align: left;
+}
+
+.run-actions > a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 44px;
+}
+
+.run-actions-menu {
+  position: relative;
+  width: 82px;
+}
+
+.run-actions-trigger {
+  width: 82px;
+  min-height: 32px;
+  padding: 5px 10px;
+  justify-content: space-between;
+  border-color: rgba(47, 129, 255, 0.3);
+  background: rgba(18, 34, 53, 0.72);
+}
+
+.run-actions-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  min-width: 118px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(10, 21, 32, 0.98);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.35);
+}
+
+.run-actions-popover a,
+.run-actions-popover button {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
   justify-content: flex-start;
 }
 
-.run-actions a:hover,
-.run-actions button:hover {
-  background: transparent;
+.run-actions-popover a:hover,
+.run-actions-popover button:hover {
+  background: rgba(47, 129, 255, 0.12);
   color: #8cc5ff;
-  text-decoration: underline;
+  text-decoration: none;
 }
 
-.run-actions .danger-link {
+.run-actions-popover .danger-link {
   color: #ff9f99;
-}
-
-.run-action-placeholder {
-  width: 36px;
-  min-height: 28px;
 }
 
 .table th.run-actions-cell,
 .table td.run-actions-cell {
-  width: 236px;
-  min-width: 236px;
+  width: 164px;
+  min-width: 164px;
 }
 
 input:focus,
