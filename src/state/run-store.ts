@@ -95,6 +95,22 @@ export class RunStore {
     });
   }
 
+  public async deleteRun(runId: string): Promise<RunRecord> {
+    const deleted = await this.withPayloadLock(async () => {
+      const payload = await this.readPayloadUnsafe();
+      const idx = payload.runs.findIndex((item) => item.id === runId);
+      if (idx < 0) {
+        throw new Error(`Run "${runId}" not found.`);
+      }
+      const [removed] = payload.runs.splice(idx, 1);
+      await this.writePayloadUnsafe(payload);
+      return removed;
+    });
+    this.seqCache.delete(runId);
+    await fs.rm(this.eventPath(runId), { force: true });
+    return deleted;
+  }
+
   public async listRuns(includeAll: boolean): Promise<RunRecord[]> {
     return this.withPayloadLock(async () => {
       const payload = await this.readPayloadUnsafe();

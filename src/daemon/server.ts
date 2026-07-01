@@ -280,6 +280,12 @@ export class ApmDaemonServer {
         return this.stopRun(asString(params.runId, "runId"));
       case "run.retry":
         return this.retryRun(asString(params.runId, "runId"));
+      case "run.pause":
+        return this.pauseRun(asString(params.runId, "runId"));
+      case "run.resume":
+        return this.resumeRun(asString(params.runId, "runId"));
+      case "run.delete":
+        return this.deleteRun(asString(params.runId, "runId"));
       case "agent.apm":
         return this.handleAgentApm(params);
       default:
@@ -714,6 +720,29 @@ export class ApmDaemonServer {
     });
   }
 
+  private async pauseRun(runId: string): Promise<{ run: RunRecord }> {
+    await this.attachBegin(runId);
+    const run = await mustRun(this.store, runId);
+    return { run };
+  }
+
+  private async resumeRun(runId: string): Promise<{ run: RunRecord }> {
+    await this.attachEnd(runId);
+    const run = await mustRun(this.store, runId);
+    return { run };
+  }
+
+  private async deleteRun(runId: string): Promise<{ run: RunRecord }> {
+    const run = await mustRun(this.store, runId);
+    if (run.status === "running" || run.status === "paused") {
+      await this.stopRun(runId);
+    }
+    this.hitl.setAttached(runId, false);
+    await this.runner.closeByPrefix(`${runId}.`);
+    const deleted = await this.store.deleteRun(runId);
+    return { run: deleted };
+  }
+
   private async handleAgentApm(params: Record<string, unknown>): Promise<unknown> {
     const op = asString(params.op, "op");
     if (!isApmToolOp(op)) {
@@ -792,6 +821,8 @@ export class ApmDaemonServer {
           hostName: typeof args.hostName === "string" ? args.hostName : undefined,
           attach: args.attach === true,
         });
+      case "run.delete":
+        return this.deleteRun(asString(args.runId ?? runId, "runId"));
       case "run.set_note":
         return { run: await this.store.updateRun(asString(args.runId ?? runId, "runId"), { note: asString(args.note, "note") }) };
       case "run.set_tag": {

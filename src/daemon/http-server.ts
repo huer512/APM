@@ -219,10 +219,31 @@ export class ApmHttpServer {
         return;
       }
 
+      const runPauseMatch = url.pathname.match(/^\/runs\/([^/]+)\/pause$/);
+      if (runPauseMatch && req.method === "POST") {
+        const result = await this.daemon.handleMethod("run.pause", { runId: runPauseMatch[1] });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      const runResumeMatch = url.pathname.match(/^\/runs\/([^/]+)\/resume$/);
+      if (runResumeMatch && req.method === "POST") {
+        const result = await this.daemon.handleMethod("run.resume", { runId: runResumeMatch[1] });
+        sendJson(res, 200, result);
+        return;
+      }
+
       const runRetryMatch = url.pathname.match(/^\/runs\/([^/]+)\/retry$/);
       if (runRetryMatch && req.method === "POST") {
         const result = await this.daemon.handleMethod("run.retry", { runId: runRetryMatch[1] });
         sendJson(res, 201, result);
+        return;
+      }
+
+      const runDeleteMatch = url.pathname.match(/^\/runs\/([^/]+)$/);
+      if (runDeleteMatch && req.method === "DELETE") {
+        const result = await this.daemon.handleMethod("run.delete", { runId: runDeleteMatch[1] });
+        sendJson(res, 200, result);
         return;
       }
 

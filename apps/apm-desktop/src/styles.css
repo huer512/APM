@@ -77,6 +77,10 @@ button.danger { border-color: rgba(255, 90, 82, 0.55); color: #ffb6b0; }
   pointer-events: none;
 }
 
+.danger-link {
+  color: #ff9f99;
+}
+
 input,
 select,
 textarea {
@@ -87,6 +91,60 @@ textarea {
   background: #071018;
   color: var(--text);
   font: inherit;
+}
+
+.inline-error {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 90, 82, 0.4);
+  border-radius: 7px;
+  background: rgba(255, 90, 82, 0.08);
+  color: #ffb6b0;
+}
+
+.run-actions {
+  display: grid;
+  grid-template-columns: repeat(5, 36px);
+  align-items: center;
+  justify-content: start;
+  gap: 10px;
+  min-width: 220px;
+}
+
+.run-actions a,
+.run-actions button {
+  min-height: 28px;
+  width: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font-weight: 700;
+  white-space: nowrap;
+  text-align: left;
+  justify-content: flex-start;
+}
+
+.run-actions a:hover,
+.run-actions button:hover {
+  background: transparent;
+  color: #8cc5ff;
+  text-decoration: underline;
+}
+
+.run-actions .danger-link {
+  color: #ff9f99;
+}
+
+.run-action-placeholder {
+  width: 36px;
+  min-height: 28px;
+}
+
+.table th.run-actions-cell,
+.table td.run-actions-cell {
+  width: 236px;
+  min-width: 236px;
 }
 
 input:focus,

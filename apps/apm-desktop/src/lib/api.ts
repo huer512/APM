@@ -69,8 +69,23 @@ export async function stopRun(runId: string): Promise<RunRecord> {
   return data.run;
 }
 
+export async function pauseRun(runId: string): Promise<RunRecord> {
+  const data = await apiFetch<{ run: RunRecord }>(`/runs/${runId}/pause`, { method: "POST" });
+  return data.run;
+}
+
+export async function resumeRun(runId: string): Promise<RunRecord> {
+  const data = await apiFetch<{ run: RunRecord }>(`/runs/${runId}/resume`, { method: "POST" });
+  return data.run;
+}
+
 export async function retryRun(runId: string): Promise<{ runId: string }> {
   return apiFetch(`/runs/${runId}/retry`, { method: "POST" });
+}
+
+export async function deleteRun(runId: string): Promise<RunRecord> {
+  const data = await apiFetch<{ run: RunRecord }>(`/runs/${runId}`, { method: "DELETE" });
+  return data.run;
 }
 
 export async function createRun(body: {

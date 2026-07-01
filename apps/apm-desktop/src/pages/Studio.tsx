@@ -67,6 +67,7 @@ const APM_TOOL_OPS = [
   "run.stop",
   "run.rerun",
   "run.start",
+  "run.delete",
   "run.set_note",
   "run.set_tag",
   "stage_plan.get",
