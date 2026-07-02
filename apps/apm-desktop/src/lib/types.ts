@@ -40,6 +40,13 @@ export interface Catalog {
   entries: CatalogItem[];
 }
 
+export interface ConfigSpace {
+  name: string;
+  label: string;
+  path: string;
+  isDefault: boolean;
+}
+
 export interface ConfigResponse {
   cursorApiKey: string;
   hasApiKey: boolean;
@@ -173,6 +180,7 @@ export interface DesktopContext {
 }
 
 export interface DaemonStatus {
+  state: "starting" | "running" | "stopped";
   running: boolean;
   httpReachable: boolean;
   message: string;

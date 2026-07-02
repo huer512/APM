@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { DaemonStatus, DesktopContext, UpdateDownloadEvent, UpdateMetadata } from "./types";
+import type { Catalog, ConfigSpace, DaemonStatus, DesktopContext, UpdateDownloadEvent, UpdateMetadata } from "./types";
 
 export async function getDesktopContext(): Promise<DesktopContext> {
   return invoke<DesktopContext>("get_desktop_context");
@@ -27,6 +27,22 @@ export async function openApmHome(): Promise<void> {
 
 export async function importMinimalTemplate(): Promise<string> {
   return invoke<string>("import_minimal_template");
+}
+
+export async function listConfigSpaces(): Promise<ConfigSpace[]> {
+  return invoke<ConfigSpace[]>("list_config_spaces");
+}
+
+export async function createConfigSpace(name: string): Promise<ConfigSpace> {
+  return invoke<ConfigSpace>("create_config_space", { name });
+}
+
+export async function deleteConfigSpace(name: string): Promise<void> {
+  await invoke("delete_config_space", { name });
+}
+
+export async function listApmCatalog(space?: string): Promise<Catalog> {
+  return invoke<Catalog>("list_apm_catalog", { space });
 }
 
 export async function readApmTextFile(relativePath: string): Promise<string> {

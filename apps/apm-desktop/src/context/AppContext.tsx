@@ -16,6 +16,7 @@ interface AppContextValue {
   context: DesktopContext | null;
   config: ConfigResponse | null;
   daemonStatus: DaemonStatus | null;
+  daemonBusy: boolean;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -35,6 +36,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [context, setContext] = useState<DesktopContext | null>(null);
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [daemonStatus, setDaemonStatus] = useState<DaemonStatus | null>(null);
+  const [daemonBusy, setDaemonBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>({
@@ -78,6 +80,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const startDaemon = useCallback(async () => {
     setError(null);
+    setDaemonBusy(true);
     try {
       await desktop.startDaemon();
       const ctx = await desktop.getDesktopContext();
@@ -89,22 +92,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       await refreshDaemon();
+    } finally {
+      setDaemonBusy(false);
     }
   }, [refresh, refreshDaemon]);
 
   const stopDaemon = useCallback(async () => {
-    await desktop.stopDaemon();
-    await refreshDaemon();
+    setError(null);
+    setDaemonBusy(true);
+    try {
+      await desktop.stopDaemon();
+      await refreshDaemon();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      await refreshDaemon();
+    } finally {
+      setDaemonBusy(false);
+    }
   }, [refreshDaemon]);
 
   const restartDaemon = useCallback(async () => {
     setError(null);
+    setDaemonBusy(true);
     try {
       await desktop.restartDaemon();
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       await refreshDaemon();
+    } finally {
+      setDaemonBusy(false);
     }
   }, [refresh, refreshDaemon]);
 
@@ -193,6 +210,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       context,
       config,
       daemonStatus,
+      daemonBusy,
       loading,
       error,
       refresh,
@@ -209,6 +227,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       context,
       config,
       daemonStatus,
+      daemonBusy,
       loading,
       error,
       refresh,

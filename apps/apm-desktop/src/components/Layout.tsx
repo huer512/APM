@@ -1,9 +1,11 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useApp } from "../context/AppContext";
+import { DaemonControl, daemonStateLabel } from "./DaemonControl";
 
 export function Layout() {
-  const { daemonStatus, startDaemon, restartDaemon, updateState, installAvailableUpdate, dismissUpdate } = useApp();
-  const ok = daemonStatus?.httpReachable ?? false;
+  const { daemonStatus, updateState, installAvailableUpdate, dismissUpdate } = useApp();
+  const ok = daemonStatus?.httpReachable || daemonStatus?.state === "running";
+  const starting = daemonStatus?.state === "starting" || !daemonStatus;
   const availableUpdate = updateState.available;
   const showUpdateNotice =
     availableUpdate &&
@@ -22,12 +24,10 @@ export function Layout() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">APM Desktop</div>
-        <div className={`daemon-pill ${ok ? "ok" : "err"}`}>
-          <strong>{ok ? "Daemon 运行中" : "Daemon 未响应"}</strong>
+        <div className={`daemon-pill ${ok ? "ok" : starting ? "warn" : "err"}`}>
+          <strong>Daemon {daemonStateLabel(daemonStatus?.state, ok)}</strong>
           <span>{daemonStatus?.message?.replace(/^Daemon 运行中\s*/, "") ?? "检查中..."}</span>
-          <button type="button" onClick={() => void restartDaemon()}>
-            重启 Daemon
-          </button>
+          <DaemonControl compact />
         </div>
         <nav>
           {navItems.map((item) => (
@@ -44,11 +44,6 @@ export function Layout() {
               <small>管理员</small>
             </div>
           </div>
-          {!ok && (
-            <button type="button" className="primary" onClick={() => void startDaemon()}>
-              启动 Daemon
-            </button>
-          )}
         </div>
       </aside>
       <main className="main">

@@ -4,10 +4,11 @@ import * as api from "../lib/api";
 import { importMinimalTemplate, openApmHome } from "../lib/desktop";
 import { useApp } from "../context/AppContext";
 import type { DesktopSummary } from "../lib/types";
+import { DaemonControl, daemonStateLabel } from "../components/DaemonControl";
 import { EmptyState, PageHeader, StatCard, StatusBadge, formatDate, formatDuration } from "../components/UI";
 
 export function Dashboard() {
-  const { daemonStatus, context, config, startDaemon, restartDaemon } = useApp();
+  const { daemonStatus, context, config } = useApp();
   const [summary, setSummary] = useState<DesktopSummary | null>(null);
   const [message, setMessage] = useState("");
 
@@ -38,17 +39,16 @@ export function Dashboard() {
 
       {!daemonStatus?.httpReachable && (
         <section className="panel hero-panel">
-          <h2>Daemon 未响应</h2>
-          <p>桌面端需要本机 Daemon 提供运行、日志、配置和接管 API。</p>
+          <h2>Daemon {daemonStateLabel(daemonStatus?.state, daemonStatus?.httpReachable)}</h2>
+          <p>{daemonStatus?.state === "starting" ? "桌面端正在启动内置 Daemon。" : "桌面端需要本机 Daemon 提供运行、日志、配置和接管 API。"}</p>
           <div className="toolbar">
-            <button type="button" className="primary" onClick={() => void startDaemon()}>启动 Daemon</button>
-            <button type="button" onClick={() => void restartDaemon()}>重启 Daemon</button>
+            <DaemonControl />
           </div>
         </section>
       )}
 
       <div className="stat-grid">
-        <StatCard label="Daemon 状态" value={daemonStatus?.httpReachable ? "运行中" : "未响应"} detail={summary?.daemon.httpBaseUrl ?? context?.httpBaseUrl ?? "-"} tone={daemonStatus?.httpReachable ? "success" : "danger"} />
+        <StatCard label="Daemon 状态" value={daemonStateLabel(daemonStatus?.state, daemonStatus?.httpReachable)} detail={summary?.daemon.httpBaseUrl ?? context?.httpBaseUrl ?? "-"} tone={daemonStatus?.httpReachable ? "success" : daemonStatus?.state === "starting" ? "warning" : "danger"} />
         <StatCard label="工作流数量" value={counts?.workflows ?? 0} detail="entries" tone="accent" />
         <StatCard label="当前运行" value={(counts?.running ?? 0) + (counts?.paused ?? 0)} detail={`等待人工 ${counts?.waitingForInput ?? 0}`} tone="warning" />
         <StatCard label="今日失败" value={counts?.failed ?? 0} detail={`已停止 ${counts?.stopped ?? 0}`} tone={(counts?.failed ?? 0) > 0 ? "danger" : "neutral"} />

@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import * as api from "../lib/api";
 import { openApmHome } from "../lib/desktop";
 import { useApp } from "../context/AppContext";
+import { DaemonControl } from "../components/DaemonControl";
 import { formatDate, PageHeader, StatusBadge } from "../components/UI";
 
 export function Settings() {
   const {
     config,
     refresh,
-    restartDaemon,
     context,
     updateState,
     checkUpdates,
@@ -80,9 +80,7 @@ export function Settings() {
         description="管理桌面端连接、Daemon HTTP API 和本地配置目录。"
         actions={
           <>
-            <button type="button" onClick={() => void restartDaemon()}>
-              重启 Daemon
-            </button>
+            <DaemonControl />
             <button type="button" className="primary" disabled={saving} onClick={() => void save()}>
               {saving ? "保存中..." : "保存设置"}
             </button>
@@ -401,9 +399,7 @@ export function Settings() {
           <section className="panel">
             <h2>快速操作</h2>
             <div className="action-list">
-              <button type="button" onClick={() => void restartDaemon()}>
-                重启 Daemon
-              </button>
+              <DaemonControl />
               <button type="button" onClick={() => void openApmHome()}>
                 打开配置目录
               </button>

@@ -4,10 +4,8 @@ import { useSearchParams } from "react-router-dom";
 import { EditorState } from "@codemirror/state";
 import { EditorView, lineNumbers } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
-import * as api from "../lib/api";
 import * as desktop from "../lib/desktop";
-import { useApp } from "../context/AppContext";
-import type { Catalog, CatalogItem } from "../lib/types";
+import type { Catalog, CatalogItem, ConfigSpace } from "../lib/types";
 import {
   parseConfigDocument,
   serializeConfigDocument,
@@ -23,9 +21,11 @@ import { MarkdownContent } from "../components/MarkdownContent";
 
 type Category = "prompts" | "stages" | "hosts" | "entries";
 type StudioDialog =
-  | { type: "create"; value: string }
-  | { type: "rename"; value: string; item: CatalogItem }
-  | { type: "delete"; item: CatalogItem }
+  | { type: "create-file"; value: string }
+  | { type: "rename-file"; value: string; item: CatalogItem }
+  | { type: "delete-file"; item: CatalogItem }
+  | { type: "create-space"; value: string }
+  | { type: "delete-space"; space: ConfigSpace }
   | null;
 
 const CATEGORIES: Array<{ id: Category; label: string }> = [
@@ -144,9 +144,10 @@ function validateFrontmatter(content: string): string | null {
 }
 
 export function Studio() {
-  const { daemonStatus } = useApp();
   const [searchParams] = useSearchParams();
   const layoutRef = useRef<HTMLDivElement | null>(null);
+  const [spaces, setSpaces] = useState<ConfigSpace[]>([]);
+  const [space, setSpace] = useState("default");
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [category, setCategory] = useState<Category>("entries");
   const [selected, setSelected] = useState<CatalogItem | null>(null);
@@ -167,11 +168,9 @@ export function Studio() {
   const lastAutoOpenRef = useRef("");
 
   useEffect(() => {
-    if (!daemonStatus?.httpReachable) {
-      return;
-    }
-    void api.fetchCatalog().then(setCatalog);
-  }, [daemonStatus?.httpReachable]);
+    void refreshSpaces();
+    void refreshCatalog("default");
+  }, []);
 
   useEffect(() => {
     if (!catalog) {
@@ -229,10 +228,33 @@ export function Studio() {
   const charCount = content.length;
   const lineCount = content.length === 0 ? 1 : content.split("\n").length;
 
-  const refreshCatalog = async () => {
-    const cat = await api.fetchCatalog();
+  const refreshSpaces = async () => {
+    const next = await desktop.listConfigSpaces();
+    setSpaces(next);
+    if (!next.some((item) => item.name === space)) {
+      setSpace("default");
+    }
+    return next;
+  };
+
+  const refreshCatalog = async (spaceName = space) => {
+    const cat = await desktop.listApmCatalog(spaceName);
     setCatalog(cat);
     return cat;
+  };
+
+  const selectSpace = async (spaceName: string) => {
+    setSpace(spaceName);
+    setSelected(null);
+    setContent("");
+    setDocument(null);
+    replaceEditorText("");
+    await refreshCatalog(spaceName);
+  };
+
+  const pathForCurrentSpace = (kind: Category, name: string) => {
+    const base = `${kind}/${name}.md`;
+    return space === "default" ? base : `spaces/${space}/${base}`;
   };
 
   const replaceEditorText = (text: string) => {
@@ -315,7 +337,7 @@ export function Studio() {
     if (!name) {
       return;
     }
-    const rel = `${category}/${name}.md`;
+    const rel = pathForCurrentSpace(category, name);
     const template =
       category === "entries"
         ? `---\nentry: stage_a\nhost: local\ntask: 描述任务\n---\n# ${name}\n`
@@ -337,7 +359,7 @@ export function Studio() {
     if (!name) {
       return;
     }
-    const newPath = `${category}/${name}.md`;
+    const newPath = pathForCurrentSpace(category, name);
     await desktop.renameApmFile(item.path, newPath);
     const cat = await refreshCatalog();
     const next = cat[category].find((entry) => entry.path === newPath);
@@ -385,12 +407,20 @@ export function Studio() {
     setDialogBusy(true);
     setLoadError(null);
     try {
-      if (dialog.type === "create") {
+      if (dialog.type === "create-file") {
         await createNew(dialog.value);
-      } else if (dialog.type === "rename") {
+      } else if (dialog.type === "rename-file") {
         await renameSelected(dialog.item, dialog.value);
-      } else {
+      } else if (dialog.type === "delete-file") {
         await deleteSelected(dialog.item);
+      } else if (dialog.type === "create-space") {
+        const created = await desktop.createConfigSpace(dialog.value);
+        await refreshSpaces();
+        await selectSpace(created.name);
+      } else {
+        await desktop.deleteConfigSpace(dialog.space.name);
+        await refreshSpaces();
+        await selectSpace("default");
       }
       setDialog(null);
     } catch (err) {
@@ -463,9 +493,37 @@ export function Studio() {
             <>
               <div className="studio-space">
                 <label>选择配置空间</label>
-                <CustomSelectBox value="demo" options={[{ value: "demo", label: "demo" }]} onChange={() => undefined} />
-                <button type="button" className="primary subtle" onClick={() => setDialog({ type: "create", value: "" })}>
-                  + 新建配置
+                <div className="studio-space-picker">
+                  <CustomSelectBox
+                    value={space}
+                    options={spaces.map((item) => ({
+                      value: item.name,
+                      label: item.label,
+                      description: item.isDefault ? "APM_HOME 根目录" : item.path,
+                    }))}
+                    onChange={(value) => void selectSpace(value)}
+                  />
+                  <button type="button" title="新建配置空间" aria-label="新建配置空间" onClick={() => setDialog({ type: "create-space", value: "" })}>
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    title="删除当前配置空间"
+                    aria-label="删除当前配置空间"
+                    disabled={space === "default"}
+                    onClick={() => {
+                      const current = spaces.find((item) => item.name === space);
+                      if (current) {
+                        setDialog({ type: "delete-space", space: current });
+                      }
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+                <button type="button" className="primary subtle" onClick={() => setDialog({ type: "create-file", value: "" })}>
+                  + 新建配置文件
                 </button>
               </div>
               <div className="studio-category-list">
@@ -505,7 +563,7 @@ export function Studio() {
                 <button
                   type="button"
                   disabled={!selected}
-                  onClick={() => selected && setDialog({ type: "rename", item: selected, value: selected.name })}
+                  onClick={() => selected && setDialog({ type: "rename-file", item: selected, value: selected.name })}
                 >
                   重命名
                 </button>
@@ -513,7 +571,7 @@ export function Studio() {
                   type="button"
                   className="danger"
                   disabled={!selected}
-                  onClick={() => selected && setDialog({ type: "delete", item: selected })}
+                  onClick={() => selected && setDialog({ type: "delete-file", item: selected })}
                 >
                   删除
                 </button>
@@ -627,9 +685,7 @@ export function Studio() {
         dialog={dialog}
         busy={dialogBusy}
         onChange={(value) => {
-          if (dialog?.type === "create") {
-            setDialog({ ...dialog, value });
-          } else if (dialog?.type === "rename") {
+          if (dialog?.type === "create-file" || dialog?.type === "rename-file" || dialog?.type === "create-space") {
             setDialog({ ...dialog, value });
           }
         }}
@@ -642,6 +698,10 @@ export function Studio() {
 
 function sanitizeFileStem(input: string): string {
   return input.trim().replace(/\.md$/i, "").replace(/[\\/]/g, "");
+}
+
+function sanitizeSpaceInput(input: string): string {
+  return input.trim().replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
 function VisualConfigEditor({
@@ -1100,16 +1160,30 @@ function StudioModal({
   if (!dialog) {
     return null;
   }
-  const isDelete = dialog.type === "delete";
-  const title = dialog.type === "create" ? "新建配置" : dialog.type === "rename" ? "重命名配置" : "删除配置";
+  const isDelete = dialog.type === "delete-file" || dialog.type === "delete-space";
+  const isSpace = dialog.type === "create-space" || dialog.type === "delete-space";
+  const title =
+    dialog.type === "create-file"
+      ? "新建配置文件"
+      : dialog.type === "rename-file"
+        ? "重命名配置文件"
+        : dialog.type === "delete-file"
+          ? "删除配置文件"
+          : dialog.type === "create-space"
+            ? "新建配置空间"
+            : "删除配置空间";
   const description =
-    dialog.type === "create"
-      ? "输入文件名即可创建当前分类下的 Markdown 配置。"
-      : dialog.type === "rename"
+    dialog.type === "create-file"
+      ? "输入文件名即可在当前分类下创建 Markdown 配置。"
+      : dialog.type === "rename-file"
         ? `将 ${dialog.item.path} 重命名为新的 Markdown 文件。`
-        : `确认删除 ${dialog.item.path}。删除后无法从桌面端恢复。`;
-  const value = dialog.type === "delete" ? "" : dialog.value;
-  const canSubmit = isDelete || sanitizeFileStem(value).length > 0;
+        : dialog.type === "delete-file"
+          ? `确认删除 ${dialog.item.path}。删除后无法从桌面端恢复。`
+          : dialog.type === "create-space"
+            ? "配置空间会创建独立的 prompts、stages、hosts 和 entries 目录。"
+            : `确认删除配置空间 ${dialog.space.label} 及其中所有配置文件。`;
+  const value = dialog.type === "create-file" || dialog.type === "rename-file" || dialog.type === "create-space" ? dialog.value : "";
+  const canSubmit = isDelete || (isSpace ? sanitizeSpaceInput(value).length > 0 : sanitizeFileStem(value).length > 0);
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
@@ -1125,11 +1199,11 @@ function StudioModal({
         </header>
         {!isDelete && (
           <label className="modal-field">
-            <span>文件名</span>
+            <span>{isSpace ? "空间名称" : "文件名"}</span>
             <input
               autoFocus
               value={value}
-              placeholder="例如 review_structure"
+              placeholder={isSpace ? "例如 research_demo" : "例如 review_structure"}
               onChange={(event) => onChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && canSubmit) {
@@ -1137,13 +1211,19 @@ function StudioModal({
                 }
               }}
             />
-            <small>会自动保存为 `.md`，不允许包含路径分隔符。</small>
+            <small>{isSpace ? "只能包含字母、数字、短横线和下划线。" : "会自动保存为 `.md`，不允许包含路径分隔符。"}</small>
           </label>
         )}
-        {isDelete && (
+        {dialog.type === "delete-file" && (
           <div className="delete-summary">
             <strong>{dialog.item.name}</strong>
             <span>{dialog.item.path}</span>
+          </div>
+        )}
+        {dialog.type === "delete-space" && (
+          <div className="delete-summary">
+            <strong>{dialog.space.label}</strong>
+            <span>{dialog.space.path}</span>
           </div>
         )}
         <footer>

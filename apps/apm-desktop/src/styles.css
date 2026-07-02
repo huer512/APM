@@ -230,8 +230,84 @@ textarea:focus {
 
 .daemon-pill strong { color: var(--danger); }
 .daemon-pill.ok strong { color: var(--success); }
+.daemon-pill.warn strong { color: var(--warning); }
 .daemon-pill span { color: var(--text-muted); font-size: 12px; word-break: break-word; }
-.daemon-pill button { width: 100%; min-height: 32px; font-size: 12px; }
+.daemon-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.daemon-actions.compact {
+  display: block;
+}
+.daemon-actions button {
+  min-height: 34px;
+}
+.daemon-actions.compact > button,
+.daemon-pill button {
+  width: 100%;
+  min-height: 32px;
+  font-size: 12px;
+}
+.daemon-action-menu {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: minmax(72px, auto) 34px;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(15, 30, 46, 0.84);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.daemon-actions.compact .daemon-action-menu {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) 34px;
+}
+.daemon-action-menu > button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  min-height: 32px;
+}
+.daemon-action-menu > button:hover {
+  background: rgba(47, 129, 255, 0.12);
+}
+.daemon-main-action {
+  justify-content: center;
+  color: #bcd6f3;
+  padding: 0 12px;
+}
+.daemon-more-action {
+  width: 34px !important;
+  padding: 0;
+  border-left: 1px solid rgba(143, 164, 186, 0.16) !important;
+  color: var(--text-muted);
+  font-size: 18px !important;
+}
+.daemon-action-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  min-width: 132px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(9, 20, 31, 0.98);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.4);
+}
+.daemon-action-popover button {
+  width: 100%;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  border-radius: 5px;
+  padding: 6px 8px;
+}
+.daemon-action-popover button:hover {
+  background: rgba(47, 129, 255, 0.12);
+}
 
 .sidebar nav { display: flex; flex-direction: column; gap: 4px; }
 .sidebar nav a {
@@ -1485,6 +1561,34 @@ textarea:focus {
   background: rgba(47, 129, 255, 0.12);
   color: #7db5ff;
   border-color: rgba(47, 129, 255, 0.4);
+}
+.studio-space-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px 54px;
+  gap: 8px;
+  align-items: stretch;
+}
+.studio-space-picker > button {
+  width: 100%;
+  min-height: 38px;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: rgba(12, 24, 35, 0.9);
+  padding: 0 10px;
+}
+.studio-space-picker > button:first-of-type {
+  color: #7db5ff;
+  border-color: rgba(47, 129, 255, 0.4);
+}
+.studio-space-picker > button.danger {
+  color: #ff9b9b;
+  border-color: rgba(255, 91, 91, 0.35);
+}
+.studio-space-picker > button:disabled {
+  opacity: 0.45;
+}
+.studio-space-picker .custom-select-menu {
+  width: min(300px, calc(100vw - 48px));
 }
 .studio-category-list {
   display: flex;

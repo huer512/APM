@@ -7,11 +7,17 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::{ipc::Channel, AppHandle, Manager, State};
+use tauri::{
+    ipc::Channel,
+    menu::MenuBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    App, AppHandle, Manager, State, WindowEvent,
+};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 struct DaemonState {
     child: Mutex<Option<Child>>,
+    starting: Mutex<bool>,
 }
 
 struct PendingUpdate {
@@ -30,6 +36,7 @@ pub struct DesktopContext {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonStatus {
+    pub state: String,
     pub running: bool,
     pub http_reachable: bool,
     pub message: String,
@@ -52,6 +59,29 @@ pub enum UpdateDownloadEvent {
     #[serde(rename_all = "camelCase")]
     Progress { chunk_length: usize },
     Finished,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigSpace {
+    pub name: String,
+    pub label: String,
+    pub path: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct CatalogItem {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ApmCatalog {
+    pub prompts: Vec<CatalogItem>,
+    pub stages: Vec<CatalogItem>,
+    pub hosts: Vec<CatalogItem>,
+    pub entries: Vec<CatalogItem>,
 }
 
 fn apm_home_dir() -> PathBuf {
@@ -100,6 +130,45 @@ fn ensure_apm_dirs(home: &Path) -> Result<(), String> {
         fs::create_dir_all(home.join(sub)).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn sanitize_space_name(input: &str) -> Result<String, String> {
+    let name = input.trim();
+    if name.is_empty() {
+        return Err("配置空间名称不能为空".to_string());
+    }
+    if name == "default" || name == "." {
+        return Err("该配置空间名称为系统保留名称".to_string());
+    }
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err("配置空间名称只能包含字母、数字、短横线和下划线".to_string());
+    }
+    Ok(name.to_string())
+}
+
+fn spaces_root(home: &Path) -> PathBuf {
+    home.join("spaces")
+}
+
+fn ensure_config_dirs(base: &Path) -> Result<(), String> {
+    for sub in ["prompts", "stages", "hosts", "entries"] {
+        fs::create_dir_all(base.join(sub)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn config_space_base(home: &Path, space: Option<&str>) -> Result<PathBuf, String> {
+    let Some(raw) = space.map(str::trim).filter(|value| !value.is_empty() && *value != "default") else {
+        ensure_config_dirs(home)?;
+        return Ok(home.to_path_buf());
+    };
+    let name = sanitize_space_name(raw)?;
+    let base = spaces_root(home).join(name);
+    ensure_config_dirs(&base)?;
+    Ok(base)
 }
 
 fn append_daemon_log(home: &Path, message: &str) {
@@ -250,27 +319,55 @@ fn get_desktop_context() -> DesktopContext {
     }
 }
 
-#[tauri::command]
-fn daemon_status() -> DaemonStatus {
+fn daemon_status_inner(state: Option<&DaemonState>) -> DaemonStatus {
     let home = apm_home_dir();
+    let starting = state
+        .and_then(|daemon| daemon.starting.lock().ok().map(|value| *value))
+        .unwrap_or(false);
     let base = http_base_from_config(&home)
         .or_else(|| std::env::var("APM_HTTP_URL").ok());
     let Some(base) = base else {
         return DaemonStatus {
+            state: if starting { "starting" } else { "stopped" }.to_string(),
             running: false,
             http_reachable: false,
-            message: "HTTP API 未配置".to_string(),
+            message: if starting {
+                "Daemon 启动中".to_string()
+            } else {
+                "HTTP API 未配置".to_string()
+            },
         };
     };
     let reachable = check_http_health(&base);
     DaemonStatus {
+        state: if reachable {
+            "running"
+        } else if starting {
+            "starting"
+        } else {
+            "stopped"
+        }
+        .to_string(),
         running: reachable,
         http_reachable: reachable,
         message: if reachable {
             format!("Daemon 运行中 ({})", base)
+        } else if starting {
+            format!("Daemon 启动中 ({})", base)
         } else {
             "Daemon 未响应".to_string()
         },
+    }
+}
+
+#[tauri::command]
+fn daemon_status(state: State<DaemonState>) -> DaemonStatus {
+    daemon_status_inner(Some(&state))
+}
+
+fn set_daemon_starting(state: &State<DaemonState>, value: bool) {
+    if let Ok(mut starting) = state.starting.lock() {
+        *starting = value;
     }
 }
 
@@ -445,12 +542,13 @@ fn kill_pid(pid: u32) -> Result<(), String> {
 }
 
 fn stop_managed_daemon(home: &Path, state: &State<DaemonState>) -> Result<DaemonStatus, String> {
+    set_daemon_starting(state, false);
     let mut guard = state.child.lock().map_err(|e| e.to_string())?;
     if let Some(mut child) = guard.take() {
         let _ = child.kill();
         let _ = child.wait();
         clear_desktop_daemon_pid(home);
-        return Ok(daemon_status());
+        return Ok(daemon_status_inner(Some(&state)));
     }
     drop(guard);
 
@@ -461,7 +559,7 @@ fn stop_managed_daemon(home: &Path, state: &State<DaemonState>) -> Result<Daemon
         clear_desktop_daemon_pid(home);
     }
 
-    Ok(daemon_status())
+    Ok(daemon_status_inner(Some(&state)))
 }
 
 #[tauri::command]
@@ -472,65 +570,70 @@ fn daemon_start(app: AppHandle, state: State<DaemonState>) -> Result<DaemonStatu
     let mut guard = state.child.lock().map_err(|e| e.to_string())?;
     if let Some(child) = guard.as_mut() {
         if child.try_wait().map_err(|e| e.to_string())?.is_none() {
-            return Ok(daemon_status());
+            return Ok(daemon_status_inner(Some(&state)));
         }
         *guard = None;
     }
 
     if let Some(base) = http_base_from_config(&home) {
         if check_http_health(&base) {
-            return Ok(daemon_status());
+            return Ok(daemon_status_inner(Some(&state)));
         }
     }
 
-    append_daemon_log(&home, "Daemon start requested by desktop.");
-    let mut sidecar = spawn_daemon_process(&app, &home)?;
+    set_daemon_starting(&state, true);
+    let result = (|| {
+        append_daemon_log(&home, "Daemon start requested by desktop.");
+        let mut sidecar = spawn_daemon_process(&app, &home)?;
 
-    let early_exit_deadline = Instant::now() + Duration::from_millis(900);
-    while Instant::now() < early_exit_deadline {
-        if let Some(status) = sidecar.try_wait().map_err(|e| e.to_string())? {
-            clear_desktop_daemon_pid(&home);
-            append_daemon_log(
-                &home,
-                &format!("Daemon exited during startup with status: {}", status),
-            );
-            return Err(format!(
-                "Daemon 启动后立即退出。请查看日志: {}\n{}",
-                desktop_daemon_log_path(&home).display(),
-                daemon_log_tail(&home)
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-
-    write_desktop_daemon_pid(&home, &sidecar)?;
-    *guard = Some(sidecar);
-
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline {
-        if let Some(child) = guard.as_mut() {
-            if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-                *guard = None;
+        let early_exit_deadline = Instant::now() + Duration::from_millis(900);
+        while Instant::now() < early_exit_deadline {
+            if let Some(status) = sidecar.try_wait().map_err(|e| e.to_string())? {
                 clear_desktop_daemon_pid(&home);
                 append_daemon_log(
                     &home,
-                    &format!("Daemon exited before HTTP health became reachable: {}", status),
+                    &format!("Daemon exited during startup with status: {}", status),
                 );
                 return Err(format!(
-                    "Daemon 未能启动 HTTP 服务并已退出。请查看日志: {}\n{}",
+                    "Daemon 启动后立即退出。请查看日志: {}\n{}",
                     desktop_daemon_log_path(&home).display(),
                     daemon_log_tail(&home)
                 ));
             }
+            std::thread::sleep(Duration::from_millis(100));
         }
-        if let Some(base) = http_base_from_config(&home) {
-            if check_http_health(&base) {
-                return Ok(daemon_status());
+
+        write_desktop_daemon_pid(&home, &sidecar)?;
+        *guard = Some(sidecar);
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            if let Some(child) = guard.as_mut() {
+                if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+                    *guard = None;
+                    clear_desktop_daemon_pid(&home);
+                    append_daemon_log(
+                        &home,
+                        &format!("Daemon exited before HTTP health became reachable: {}", status),
+                    );
+                    return Err(format!(
+                        "Daemon 未能启动 HTTP 服务并已退出。请查看日志: {}\n{}",
+                        desktop_daemon_log_path(&home).display(),
+                        daemon_log_tail(&home)
+                    ));
+                }
             }
+            if let Some(base) = http_base_from_config(&home) {
+                if check_http_health(&base) {
+                    return Ok(daemon_status_inner(Some(&state)));
+                }
+            }
+            std::thread::sleep(Duration::from_millis(300));
         }
-        std::thread::sleep(Duration::from_millis(300));
-    }
-    Ok(daemon_status())
+        Ok(daemon_status_inner(Some(&state)))
+    })();
+    set_daemon_starting(&state, false);
+    result
 }
 
 #[tauri::command]
@@ -544,6 +647,94 @@ fn daemon_restart(app: AppHandle, state: State<DaemonState>) -> Result<DaemonSta
     let home = apm_home_dir();
     let _ = stop_managed_daemon(&home, &state);
     daemon_start(app, state)
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn quit_app(app: &AppHandle, stop_daemon: bool) {
+    if stop_daemon {
+        let home = apm_home_dir();
+        let state = app.state::<DaemonState>();
+        let _ = stop_managed_daemon(&home, &state);
+    }
+    app.exit(0);
+}
+
+fn setup_window_close_behavior(app: &App) {
+    if let Some(window) = app.get_webview_window("main") {
+        let window_for_event = window.clone();
+        window.on_window_event(move |event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window_for_event.hide();
+            }
+        });
+    }
+}
+
+fn setup_tray(app: &App) -> Result<(), String> {
+    let menu = MenuBuilder::new(app)
+        .text("show", "打开 APM Desktop")
+        .separator()
+        .text("daemon_start", "启动 Daemon")
+        .text("daemon_restart", "重启 Daemon")
+        .text("daemon_stop", "停止 Daemon")
+        .separator()
+        .text("quit", "退出桌面端")
+        .text("quit_stop_daemon", "退出并停止 Daemon")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let icon = app.default_window_icon().cloned();
+    let mut builder = TrayIconBuilder::new()
+        .menu(&menu)
+        .tooltip("APM Desktop")
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => show_main_window(app),
+            "daemon_start" => {
+                let handle = app.clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<DaemonState>();
+                    let _ = daemon_start(handle.clone(), state);
+                });
+            }
+            "daemon_restart" => {
+                let handle = app.clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<DaemonState>();
+                    let _ = daemon_restart(handle.clone(), state);
+                });
+            }
+            "daemon_stop" => {
+                let home = apm_home_dir();
+                let state = app.state::<DaemonState>();
+                let _ = stop_managed_daemon(&home, &state);
+            }
+            "quit" => quit_app(app, false),
+            "quit_stop_daemon" => quit_app(app, true),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = icon {
+        builder = builder.icon(icon);
+    }
+    builder.build(app).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -603,6 +794,110 @@ fn resolve_apm_relative_path(relative_path: &str) -> Result<PathBuf, String> {
     }
     let home = apm_home_dir();
     Ok(home.join(rel))
+}
+
+fn scan_catalog_dir(base: &Path, rel_prefix: &str, kind: &str) -> Result<Vec<CatalogItem>, String> {
+    let dir = base.join(kind);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut items = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        let rel = if rel_prefix.is_empty() {
+            format!("{}/{}", kind, file_name)
+        } else {
+            format!("{}/{}/{}", rel_prefix, kind, file_name)
+        };
+        items.push(CatalogItem {
+            name: stem.to_string(),
+            path: rel,
+        });
+    }
+    items.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(items)
+}
+
+#[tauri::command]
+fn list_config_spaces() -> Result<Vec<ConfigSpace>, String> {
+    let home = apm_home_dir();
+    ensure_apm_dirs(&home)?;
+    let root = spaces_root(&home);
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let mut spaces = vec![ConfigSpace {
+        name: "default".to_string(),
+        label: "默认空间".to_string(),
+        path: ".".to_string(),
+        is_default: true,
+    }];
+    for entry in fs::read_dir(&root).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if sanitize_space_name(&name).is_err() {
+            continue;
+        }
+        spaces.push(ConfigSpace {
+            label: name.clone(),
+            path: format!("spaces/{}", name),
+            name,
+            is_default: false,
+        });
+    }
+    spaces[1..].sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(spaces)
+}
+
+#[tauri::command]
+fn create_config_space(name: String) -> Result<ConfigSpace, String> {
+    let home = apm_home_dir();
+    ensure_apm_dirs(&home)?;
+    let name = sanitize_space_name(&name)?;
+    let base = spaces_root(&home).join(&name);
+    if base.exists() {
+        return Err(format!("配置空间已存在: {}", name));
+    }
+    ensure_config_dirs(&base)?;
+    Ok(ConfigSpace {
+        label: name.clone(),
+        path: format!("spaces/{}", name),
+        name,
+        is_default: false,
+    })
+}
+
+#[tauri::command]
+fn delete_config_space(name: String) -> Result<(), String> {
+    let home = apm_home_dir();
+    let name = sanitize_space_name(&name)?;
+    let base = spaces_root(&home).join(&name);
+    if !base.exists() {
+        return Err(format!("配置空间不存在: {}", name));
+    }
+    fs::remove_dir_all(&base).map_err(|e| format!("无法删除配置空间 {}: {}", name, e))
+}
+
+#[tauri::command]
+fn list_apm_catalog(space: Option<String>) -> Result<ApmCatalog, String> {
+    let home = apm_home_dir();
+    ensure_apm_dirs(&home)?;
+    let space_name = space.as_deref().filter(|value| !value.trim().is_empty() && *value != "default");
+    let base = config_space_base(&home, space_name)?;
+    let rel_prefix = space_name.map(|name| format!("spaces/{}", name)).unwrap_or_default();
+    Ok(ApmCatalog {
+        prompts: scan_catalog_dir(&base, &rel_prefix, "prompts")?,
+        stages: scan_catalog_dir(&base, &rel_prefix, "stages")?,
+        hosts: scan_catalog_dir(&base, &rel_prefix, "hosts")?,
+        entries: scan_catalog_dir(&base, &rel_prefix, "entries")?,
+    })
 }
 
 #[tauri::command]
@@ -737,6 +1032,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(DaemonState {
             child: Mutex::new(None),
+            starting: Mutex::new(false),
         })
         .manage(PendingUpdate {
             update: Mutex::new(None),
@@ -749,6 +1045,10 @@ pub fn run() {
             daemon_restart,
             open_apm_home,
             import_minimal_template,
+            list_config_spaces,
+            create_config_space,
+            delete_config_space,
+            list_apm_catalog,
             read_apm_text_file,
             write_apm_text_file,
             rename_apm_file,
@@ -758,9 +1058,13 @@ pub fn run() {
             restart_app,
         ])
         .setup(|app| {
+            setup_window_close_behavior(app);
+            setup_tray(app).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
             let handle = app.handle().clone();
-            let state = app.state::<DaemonState>();
-            let _ = daemon_start(handle, state);
+            std::thread::spawn(move || {
+                let state = handle.state::<DaemonState>();
+                let _ = daemon_start(handle.clone(), state);
+            });
             Ok(())
         })
         .run(tauri::generate_context!())
